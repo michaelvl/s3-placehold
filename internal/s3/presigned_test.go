@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // presignedRequest builds a correctly-signed presigned-URL GET/HEAD request
@@ -18,14 +19,22 @@ import (
 // SigV4's query-string signing variant.
 func presignedRequest(t *testing.T, method, path, host string) *http.Request {
 	t.Helper()
-	dateStamp := testAmzDate[:8]
+	return presignedRequestAt(t, method, path, host, testAmzDate, "300")
+}
+
+// presignedRequestAt is like presignedRequest but signs at an explicit
+// amzDate and X-Amz-Expires, so tests can build fixtures that exercise
+// expiry handling.
+func presignedRequestAt(t *testing.T, method, path, host, amzDate, expires string) *http.Request {
+	t.Helper()
+	dateStamp := amzDate[:8]
 	scope := dateStamp + "/" + testRegion + "/" + testService + "/aws4_request"
 
 	query := url.Values{}
 	query.Set("X-Amz-Algorithm", "AWS4-HMAC-SHA256")
 	query.Set("X-Amz-Credential", testAccessKeyID+"/"+scope)
-	query.Set("X-Amz-Date", testAmzDate)
-	query.Set("X-Amz-Expires", "300")
+	query.Set("X-Amz-Date", amzDate)
+	query.Set("X-Amz-Expires", expires)
 	query.Set("X-Amz-SignedHeaders", "host")
 
 	pairs := make([]string, 0, len(query))
@@ -49,7 +58,7 @@ func presignedRequest(t *testing.T, method, path, host string) *http.Request {
 	hashedCR := sha256.Sum256([]byte(canonicalRequest))
 	stringToSign := strings.Join([]string{
 		"AWS4-HMAC-SHA256",
-		testAmzDate,
+		amzDate,
 		scope,
 		hex.EncodeToString(hashedCR[:]),
 	}, "\n")
@@ -132,6 +141,39 @@ func TestPresignedInvalidSignatureReturnsSignatureDoesNotMatch(t *testing.T) {
 	}
 	if errResp.Code != "SignatureDoesNotMatch" {
 		t.Errorf("Code = %q, want %q", errResp.Code, "SignatureDoesNotMatch")
+	}
+}
+
+func TestPresignedExpiredReturnsAccessDenied(t *testing.T) {
+	h := testPrivateBucketHandler()
+	amzDate := time.Now().Add(-10 * time.Minute).UTC().Format(amzDateLayout)
+	req := presignedRequestAt(t, http.MethodGet, "/assets/format=png", "localhost", amzDate, "300")
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", rec.Code, rec.Body.String())
+	}
+	var errResp s3Error
+	if err := xml.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("failed to unmarshal error XML: %v; body: %s", err, rec.Body.String())
+	}
+	if errResp.Code != "AccessDenied" {
+		t.Errorf("Code = %q, want %q", errResp.Code, "AccessDenied")
+	}
+}
+
+func TestPresignedWithinExpiryWindowSucceeds(t *testing.T) {
+	h := testPrivateBucketHandler()
+	amzDate := time.Now().Add(-4 * time.Minute).UTC().Format(amzDateLayout)
+	req := presignedRequestAt(t, http.MethodGet, "/assets/format=png", "localhost", amzDate, "300")
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
 	}
 }
 

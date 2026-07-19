@@ -79,11 +79,16 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request, presigned bo
 	creds := sigv4.Credentials{AccessKeyID: h.cfg.AccessKeyID, SecretAccessKey: h.cfg.SecretAccessKey}
 
 	if presigned {
-		if err := sigv4.VerifyPresigned(r, creds); err != nil {
+		switch err := sigv4.VerifyPresigned(r, creds); err {
+		case nil:
+			return true
+		case sigv4.ErrExpired:
+			writeS3Error(w, http.StatusForbidden, "AccessDenied", "Request has expired")
+			return false
+		default:
 			writeS3Error(w, http.StatusForbidden, "SignatureDoesNotMatch", "The request signature we calculated does not match the signature you provided.")
 			return false
 		}
-		return true
 	}
 
 	switch err := sigv4.Verify(r, creds); err {

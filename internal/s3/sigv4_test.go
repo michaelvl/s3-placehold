@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/michaelvl/s3-placehold/internal/config"
 	"github.com/michaelvl/s3-placehold/internal/image"
@@ -21,9 +22,13 @@ const (
 	testSecretAccessKey = "testsecretkey1234567890abcdefghijklmnop"
 	testRegion          = "us-east-1"
 	testService         = "s3"
-	testAmzDate         = "20250101T120000Z"
 	emptyPayloadHash    = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	amzDateLayout       = "20060102T150405Z"
 )
+
+// testAmzDate is "now" formatted as an X-Amz-Date value, so fixtures signed
+// with it fall within any reasonable X-Amz-Expires window.
+var testAmzDate = time.Now().UTC().Format(amzDateLayout)
 
 func testPrivateBucketHandler() *Handler {
 	cfg := config.Config{

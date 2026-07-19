@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 const (
@@ -17,8 +18,18 @@ const (
 	testSecretAccessKey = "testsecretkey1234567890abcdefghijklmnop"
 	testRegion          = "us-east-1"
 	testService         = "s3"
-	testDate            = "20250101T120000Z"
 )
+
+// testDate is "now" formatted as an X-Amz-Date value, so fixtures signed
+// with it fall within any reasonable X-Amz-Expires window without needing
+// to mock the clock checkExpiry reads from.
+var testDate = time.Now().UTC().Format(amzDateLayout)
+
+// amzDateAt formats t as an X-Amz-Date value, for building fixtures at a
+// specific offset from "now" (e.g. to test expiry).
+func amzDateAt(t time.Time) string {
+	return t.UTC().Format(amzDateLayout)
+}
 
 func testCreds() Credentials {
 	return Credentials{AccessKeyID: testAccessKeyID, SecretAccessKey: testSecretAccessKey}
@@ -245,13 +256,21 @@ func refCanonicalQueryValues(query url.Values) string {
 // sentinel payload hash, per SigV4's query-string signing variant.
 func presignedRequest(t *testing.T, method, path, host, expires string) *http.Request {
 	t.Helper()
-	dateStamp := testDate[:8]
+	return presignedRequestAt(t, method, path, host, testDate, expires)
+}
+
+// presignedRequestAt is like presignedRequest but signs at an explicit
+// amzDate, so tests can build fixtures whose X-Amz-Date lies far enough in
+// the past to exercise expiry handling.
+func presignedRequestAt(t *testing.T, method, path, host, amzDate, expires string) *http.Request {
+	t.Helper()
+	dateStamp := amzDate[:8]
 	scope := dateStamp + "/" + testRegion + "/" + testService + "/aws4_request"
 
 	query := url.Values{}
 	query.Set("X-Amz-Algorithm", "AWS4-HMAC-SHA256")
 	query.Set("X-Amz-Credential", testAccessKeyID+"/"+scope)
-	query.Set("X-Amz-Date", testDate)
+	query.Set("X-Amz-Date", amzDate)
 	query.Set("X-Amz-Expires", expires)
 	query.Set("X-Amz-SignedHeaders", "host")
 
@@ -267,7 +286,7 @@ func presignedRequest(t *testing.T, method, path, host, expires string) *http.Re
 	hashedCR := sha256.Sum256([]byte(canonicalRequest))
 	stringToSign := strings.Join([]string{
 		"AWS4-HMAC-SHA256",
-		testDate,
+		amzDate,
 		scope,
 		hex.EncodeToString(hashedCR[:]),
 	}, "\n")
@@ -298,6 +317,24 @@ func TestVerifyPresignedAcceptsHeadRequest(t *testing.T) {
 
 	if err := VerifyPresigned(req, testCreds()); err != nil {
 		t.Fatalf("VerifyPresigned() = %v, want nil", err)
+	}
+}
+
+func TestVerifyPresignedWithinExpiryWindowAccepted(t *testing.T) {
+	amzDate := amzDateAt(time.Now().Add(-4 * time.Minute))
+	req := presignedRequestAt(t, http.MethodGet, "/assets/format=png", "localhost", amzDate, "300")
+
+	if err := VerifyPresigned(req, testCreds()); err != nil {
+		t.Fatalf("VerifyPresigned() = %v, want nil", err)
+	}
+}
+
+func TestVerifyPresignedExpiredRejected(t *testing.T) {
+	amzDate := amzDateAt(time.Now().Add(-10 * time.Minute))
+	req := presignedRequestAt(t, http.MethodGet, "/assets/format=png", "localhost", amzDate, "300")
+
+	if err := VerifyPresigned(req, testCreds()); err != ErrExpired {
+		t.Fatalf("VerifyPresigned() = %v, want ErrExpired", err)
 	}
 }
 

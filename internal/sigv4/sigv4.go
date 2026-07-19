@@ -11,7 +11,9 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // ErrMissingAuthorization is returned when the request carries no
@@ -22,6 +24,14 @@ var ErrMissingAuthorization = errors.New("sigv4: missing Authorization header")
 // but malformed, references an unknown access key, or its signature does
 // not match the request.
 var ErrSignatureMismatch = errors.New("sigv4: signature does not match")
+
+// ErrExpired is returned by VerifyPresigned when the signature is valid but
+// the X-Amz-Date + X-Amz-Expires window has already elapsed.
+var ErrExpired = errors.New("sigv4: presigned URL has expired")
+
+// amzDateLayout is the time.Parse layout for X-Amz-Date's ISO 8601 basic
+// format, e.g. "20060102T150405Z".
+const amzDateLayout = "20060102T150405Z"
 
 // emptyPayloadHash is Hex(SHA256("")), the hashed payload for a request
 // with no body (every operation this server signs is GET/HEAD).
@@ -144,11 +154,14 @@ func parseCredential(value string) (credentialScope, error) {
 
 // VerifyPresigned validates a presigned URL's query-string SigV4 signature
 // (X-Amz-Signature, X-Amz-Credential, X-Amz-Date, and — if present —
-// X-Amz-SignedHeaders) against creds. It returns nil if the signature is
-// valid, or ErrSignatureMismatch for any failure: no X-Amz-Signature
-// parameter, a malformed or unknown credential, or a signature that does not
-// match the request. Callers are expected to have already detected the
-// request as presigned (X-Amz-Signature present) before calling this.
+// X-Amz-SignedHeaders) against creds, and that its X-Amz-Expires window
+// (relative to X-Amz-Date) has not elapsed. It returns nil if the request is
+// valid and unexpired, ErrExpired if the signature checks out but the
+// expiry window has passed, or ErrSignatureMismatch for any other failure:
+// no X-Amz-Signature parameter, a malformed or unknown credential, a
+// malformed X-Amz-Expires, or a signature that does not match the request.
+// Callers are expected to have already detected the request as presigned
+// (X-Amz-Signature present) before calling this.
 func VerifyPresigned(req *http.Request, creds Credentials) error {
 	query := req.URL.Query()
 
@@ -169,7 +182,34 @@ func VerifyPresigned(req *http.Request, creds Credentials) error {
 
 	amzDate := query.Get("X-Amz-Date")
 	canonicalRequest := buildPresignedCanonicalRequest(req, query, signedHeaders)
-	return checkSignature(creds, scope, amzDate, canonicalRequest, signature)
+	if err := checkSignature(creds, scope, amzDate, canonicalRequest, signature); err != nil {
+		return err
+	}
+	return checkExpiry(amzDate, query.Get("X-Amz-Expires"))
+}
+
+// checkExpiry parses amzDate and expiresParam (the X-Amz-Date and
+// X-Amz-Expires query parameters of a presigned URL) and reports whether
+// the expiry window they describe has elapsed relative to the current time.
+// Both values are covered by the signature, so a malformed amzDate or
+// expiresParam here reflects a bad request rather than tampering; lacking a
+// more specific code, that case is also reported as ErrSignatureMismatch. An
+// elapsed window is reported as ErrExpired.
+func checkExpiry(amzDate, expiresParam string) error {
+	signedAt, err := time.Parse(amzDateLayout, amzDate)
+	if err != nil {
+		return ErrSignatureMismatch
+	}
+
+	expiresSeconds, err := strconv.Atoi(expiresParam)
+	if err != nil || expiresSeconds < 0 {
+		return ErrSignatureMismatch
+	}
+
+	if time.Now().After(signedAt.Add(time.Duration(expiresSeconds) * time.Second)) {
+		return ErrExpired
+	}
+	return nil
 }
 
 // buildPresignedCanonicalRequest assembles the SigV4 canonical request

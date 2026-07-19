@@ -114,6 +114,8 @@ The server validates SigV4 signatures against a single configured credential pai
 
 Presigned URLs carry the signature in query parameters (`X-Amz-Signature`, `X-Amz-Credential`, `X-Amz-Date`, `X-Amz-Expires`). Regular authenticated requests carry the `Authorization` header.
 
+For a presigned URL, once the signature itself checks out, `X-Amz-Date` + `X-Amz-Expires` (seconds) is compared against the current time. A request outside its expiry window is rejected even though its signature is valid — see §7.
+
 Invalid or missing credentials on a private bucket return `AccessDenied` or `SignatureDoesNotMatch` as appropriate (see §7).
 
 ---
@@ -173,6 +175,7 @@ All errors are returned in the standard S3 XML envelope:
 | Request to a private bucket with no credentials | `AccessDenied` | 403 |
 | SigV4 signature present but invalid | `SignatureDoesNotMatch` | 403 |
 | Presigned URL signature invalid | `SignatureDoesNotMatch` | 403 |
+| Presigned URL signature valid but `X-Amz-Date` + `X-Amz-Expires` has elapsed | `AccessDenied` ("Request has expired") | 403 |
 | Unsupported HTTP method | `MethodNotAllowed` | 405 |
 
 ---
