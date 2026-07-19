@@ -48,3 +48,44 @@ func TestLoadInvalidBucketMode(t *testing.T) {
 		t.Fatalf("Load with invalid bucket mode = nil error, want error")
 	}
 }
+
+func TestLoadMultipleBuckets(t *testing.T) {
+	t.Setenv("BUCKETS", "images:public,assets:private")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	want := []BucketConfig{
+		{Name: "images", Mode: ModePublic},
+		{Name: "assets", Mode: ModePrivate},
+	}
+	if len(cfg.Buckets) != len(want) {
+		t.Fatalf("len(Buckets) = %d, want %d", len(cfg.Buckets), len(want))
+	}
+	for i, b := range want {
+		if cfg.Buckets[i] != b {
+			t.Errorf("Buckets[%d] = %+v, want %+v", i, cfg.Buckets[i], b)
+		}
+	}
+}
+
+func TestLookup(t *testing.T) {
+	cfg := Config{Buckets: []BucketConfig{
+		{Name: "images", Mode: ModePublic},
+		{Name: "assets", Mode: ModePrivate},
+	}}
+
+	b, ok := cfg.Lookup("assets")
+	if !ok {
+		t.Fatalf("Lookup(%q) ok = false, want true", "assets")
+	}
+	if b.Mode != ModePrivate {
+		t.Errorf("Lookup(%q).Mode = %q, want %q", "assets", b.Mode, ModePrivate)
+	}
+
+	if _, ok := cfg.Lookup("missing"); ok {
+		t.Errorf("Lookup(%q) ok = true, want false", "missing")
+	}
+}

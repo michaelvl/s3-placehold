@@ -3,6 +3,7 @@
 package s3
 
 import (
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -26,7 +27,12 @@ func NewHandler(cfg config.Config, synthesizer synth.Synthesizer) *Handler {
 
 // ServeHTTP implements http.Handler.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	bucket, objectKey := splitPathStyle(r.URL.Path)
+	bucket, objectKey := splitRequestPath(r.Host, r.URL.Path)
+
+	if _, ok := h.cfg.Lookup(bucket); !ok {
+		writeS3Error(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
+		return
+	}
 
 	query := r.URL.Query()
 	noQuery := len(query) == 0
@@ -76,6 +82,27 @@ func (h *Handler) respondObject(w http.ResponseWriter, objectKey string, include
 // given error's text.
 func writeInvalidArgument(w http.ResponseWriter, err error) {
 	writeS3Error(w, http.StatusBadRequest, "InvalidArgument", err.Error())
+}
+
+// splitRequestPath extracts the bucket name and object key from a request,
+// detecting virtual-hosted vs. path-style addressing from the Host header.
+// A Host whose hostname carries more than one dot-separated label is
+// virtual-hosted ({bucket}.{server-host}): the first label is the bucket
+// and the full path is the key. Otherwise it's path-style: the first path
+// segment is the bucket and the remainder is the key. An IP-literal
+// hostname (e.g. a Docker Compose service reached by container IP) is
+// always path-style, even though it contains dots.
+func splitRequestPath(host, path string) (bucket, objectKey string) {
+	hostname := host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		hostname = h
+	}
+	if net.ParseIP(hostname) == nil {
+		if label, _, ok := strings.Cut(hostname, "."); ok {
+			return label, strings.TrimPrefix(path, "/")
+		}
+	}
+	return splitPathStyle(path)
 }
 
 // splitPathStyle extracts the bucket name and object key from a path-style

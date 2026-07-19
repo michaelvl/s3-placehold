@@ -66,6 +66,16 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
+// Lookup returns the BucketConfig for name and whether it is configured.
+func (c Config) Lookup(name string) (BucketConfig, bool) {
+	for _, b := range c.Buckets {
+		if b.Name == name {
+			return b, true
+		}
+	}
+	return BucketConfig{}, false
+}
+
 func parseBuckets(raw string) ([]BucketConfig, error) {
 	entries := strings.Split(raw, ",")
 	buckets := make([]BucketConfig, 0, len(entries))

@@ -29,6 +29,7 @@ func testHandler() *Handler {
 func TestGetObjectDefaultKey(t *testing.T) {
 	h := testHandler()
 	req := httptest.NewRequest(http.MethodGet, "/placeholder/", nil)
+	req.Host = "localhost"
 	rec := httptest.NewRecorder()
 
 	h.ServeHTTP(rec, req)
@@ -52,6 +53,7 @@ func TestGetObjectDefaultKey(t *testing.T) {
 func TestHeadObjectDefaultKey(t *testing.T) {
 	h := testHandler()
 	req := httptest.NewRequest(http.MethodHead, "/placeholder/", nil)
+	req.Host = "localhost"
 	rec := httptest.NewRecorder()
 
 	h.ServeHTTP(rec, req)
@@ -73,6 +75,7 @@ func TestHeadObjectDefaultKey(t *testing.T) {
 func TestUnsupportedMethodReturns405(t *testing.T) {
 	h := testHandler()
 	req := httptest.NewRequest(http.MethodPut, "/placeholder/", nil)
+	req.Host = "localhost"
 	rec := httptest.NewRecorder()
 
 	h.ServeHTTP(rec, req)
@@ -99,6 +102,7 @@ func TestUnsupportedMethodReturns405(t *testing.T) {
 func TestGetObjectPNGWithSizeColourAndText(t *testing.T) {
 	h := testHandler()
 	req := httptest.NewRequest(http.MethodGet, "/placeholder/format=png/size=200x300/colour=ff0000/text=hello+world", nil)
+	req.Host = "localhost"
 	rec := httptest.NewRecorder()
 
 	h.ServeHTTP(rec, req)
@@ -125,6 +129,7 @@ func TestGetObjectPNGWithSizeColourAndText(t *testing.T) {
 func TestGetObjectJPEGWithNamedColour(t *testing.T) {
 	h := testHandler()
 	req := httptest.NewRequest(http.MethodGet, "/placeholder/format=jpeg/size=400x200/colour=lightblue", nil)
+	req.Host = "localhost"
 	rec := httptest.NewRecorder()
 
 	h.ServeHTTP(rec, req)
@@ -147,6 +152,7 @@ func TestGetObjectJPEGWithNamedColour(t *testing.T) {
 func TestGetObjectFixedDelay(t *testing.T) {
 	h := testHandler()
 	req := httptest.NewRequest(http.MethodGet, "/placeholder/delay=50", nil)
+	req.Host = "localhost"
 	rec := httptest.NewRecorder()
 
 	start := time.Now()
@@ -164,6 +170,7 @@ func TestGetObjectFixedDelay(t *testing.T) {
 func TestGetObjectRangeDelay(t *testing.T) {
 	h := testHandler()
 	req := httptest.NewRequest(http.MethodGet, "/placeholder/delay=20,60", nil)
+	req.Host = "localhost"
 	rec := httptest.NewRecorder()
 
 	start := time.Now()
@@ -181,6 +188,7 @@ func TestGetObjectRangeDelay(t *testing.T) {
 func TestListObjectsV2Empty(t *testing.T) {
 	h := testHandler()
 	req := httptest.NewRequest(http.MethodGet, "/placeholder/?list-type=2", nil)
+	req.Host = "localhost"
 	rec := httptest.NewRecorder()
 
 	h.ServeHTTP(rec, req)
@@ -214,6 +222,7 @@ func TestListObjectsDispatchOnListingParams(t *testing.T) {
 		t.Run(p, func(t *testing.T) {
 			h := testHandler()
 			req := httptest.NewRequest(http.MethodGet, "/placeholder/?"+p+"=x", nil)
+			req.Host = "localhost"
 			rec := httptest.NewRecorder()
 
 			h.ServeHTTP(rec, req)
@@ -232,6 +241,7 @@ func TestListObjectsDispatchOnListingParams(t *testing.T) {
 func TestDeleteObjectNoop(t *testing.T) {
 	h := testHandler()
 	req := httptest.NewRequest(http.MethodDelete, "/placeholder/some/key", nil)
+	req.Host = "localhost"
 	rec := httptest.NewRecorder()
 
 	h.ServeHTTP(rec, req)
@@ -247,6 +257,7 @@ func TestDeleteObjectNoop(t *testing.T) {
 func TestDeleteObjectsBatchNoop(t *testing.T) {
 	h := testHandler()
 	req := httptest.NewRequest(http.MethodPost, "/placeholder/?delete", nil)
+	req.Host = "localhost"
 	rec := httptest.NewRecorder()
 
 	h.ServeHTTP(rec, req)
@@ -280,6 +291,7 @@ func TestGetObjectInvalidParametersReturn400(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := testHandler()
 			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.Host = "localhost"
 			rec := httptest.NewRecorder()
 
 			h.ServeHTTP(rec, req)
@@ -297,6 +309,101 @@ func TestGetObjectInvalidParametersReturn400(t *testing.T) {
 			}
 			if errResp.Code != "InvalidArgument" {
 				t.Errorf("Code = %q, want %q", errResp.Code, "InvalidArgument")
+			}
+			if errResp.RequestID == "" {
+				t.Errorf("RequestId is empty")
+			}
+		})
+	}
+}
+
+func testMultiBucketHandler() *Handler {
+	cfg := config.Config{
+		Port: 9000,
+		Buckets: []config.BucketConfig{
+			{Name: "images", Mode: config.ModePublic},
+			{Name: "assets", Mode: config.ModePrivate},
+		},
+	}
+	router := synth.NewRouter(image.New())
+	return NewHandler(cfg, router)
+}
+
+func TestVirtualHostedStyleResolvesBucketAndKey(t *testing.T) {
+	h := testMultiBucketHandler()
+	req := httptest.NewRequest(http.MethodGet, "/format=png", nil)
+	req.Host = "images.localhost"
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/png" {
+		t.Errorf("Content-Type = %q, want %q", got, "image/png")
+	}
+}
+
+func TestPathStyleResolvesEitherConfiguredBucket(t *testing.T) {
+	for _, bucket := range []string{"images", "assets"} {
+		t.Run(bucket, func(t *testing.T) {
+			h := testMultiBucketHandler()
+			req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/", nil)
+			req.Host = "localhost"
+			rec := httptest.NewRecorder()
+
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestIPLiteralHostIsPathStyle(t *testing.T) {
+	h := testHandler()
+	req := httptest.NewRequest(http.MethodGet, "/placeholder/", nil)
+	req.Host = "127.0.0.1:9000"
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUnconfiguredBucketReturnsNoSuchBucket(t *testing.T) {
+	cases := []struct {
+		name string
+		host string
+		path string
+	}{
+		{"path-style", "localhost", "/nope/"},
+		{"virtual-hosted", "nope.localhost", "/"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := testHandler()
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req.Host = tc.host
+			rec := httptest.NewRecorder()
+
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404; body: %s", rec.Code, rec.Body.String())
+			}
+
+			var errResp s3Error
+			if err := xml.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+				t.Fatalf("failed to unmarshal error XML: %v; body: %s", err, rec.Body.String())
+			}
+			if errResp.Code != "NoSuchBucket" {
+				t.Errorf("Code = %q, want %q", errResp.Code, "NoSuchBucket")
 			}
 			if errResp.RequestID == "" {
 				t.Errorf("RequestId is empty")
