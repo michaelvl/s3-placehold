@@ -18,7 +18,7 @@ docker run --rm -p 9000:9000 \
   -e BUCKETS=images:public,assets:private \
   -e AWS_ACCESS_KEY_ID=demo \
   -e AWS_SECRET_ACCESS_KEY=demosecret \
-  ghcr.io/michaelvl/s3-placehold:latest
+  ghcr.io/michaelvl/s3-placehold/s3-placehold:latest
 ```
 
 This configures a public `images` bucket and a private `assets` bucket; every
