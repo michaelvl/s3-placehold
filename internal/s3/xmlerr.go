@@ -17,14 +17,20 @@ type s3Error struct {
 // writeS3Error serializes an S3-style XML error envelope with a fresh
 // per-request id.
 func writeS3Error(w http.ResponseWriter, status int, code, message string) {
-	w.Header().Set("Content-Type", "application/xml")
-	w.WriteHeader(status)
-
-	body, err := xml.MarshalIndent(s3Error{
+	writeXML(w, status, s3Error{
 		Code:      code,
 		Message:   message,
 		RequestID: newRequestID(),
-	}, "", "  ")
+	})
+}
+
+// writeXML serializes v as an S3-style XML response body with the given
+// HTTP status.
+func writeXML(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/xml")
+	w.WriteHeader(status)
+
+	body, err := xml.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return
 	}

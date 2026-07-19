@@ -178,6 +178,92 @@ func TestGetObjectRangeDelay(t *testing.T) {
 	}
 }
 
+func TestListObjectsV2Empty(t *testing.T) {
+	h := testHandler()
+	req := httptest.NewRequest(http.MethodGet, "/placeholder/?list-type=2", nil)
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/xml" {
+		t.Errorf("Content-Type = %q, want %q", got, "application/xml")
+	}
+
+	var result listBucketResult
+	if err := xml.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal ListBucketResult XML: %v; body: %s", err, rec.Body.String())
+	}
+	if result.Name != "placeholder" {
+		t.Errorf("Name = %q, want %q", result.Name, "placeholder")
+	}
+	if result.KeyCount != 0 {
+		t.Errorf("KeyCount = %d, want 0", result.KeyCount)
+	}
+	if result.IsTruncated {
+		t.Errorf("IsTruncated = true, want false")
+	}
+}
+
+func TestListObjectsDispatchOnListingParams(t *testing.T) {
+	params := []string{"prefix", "delimiter", "marker", "continuation-token"}
+
+	for _, p := range params {
+		t.Run(p, func(t *testing.T) {
+			h := testHandler()
+			req := httptest.NewRequest(http.MethodGet, "/placeholder/?"+p+"=x", nil)
+			rec := httptest.NewRecorder()
+
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+			}
+			var result listBucketResult
+			if err := xml.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+				t.Fatalf("failed to unmarshal ListBucketResult XML: %v; body: %s", err, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestDeleteObjectNoop(t *testing.T) {
+	h := testHandler()
+	req := httptest.NewRequest(http.MethodDelete, "/placeholder/some/key", nil)
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("body length = %d, want 0", rec.Body.Len())
+	}
+}
+
+func TestDeleteObjectsBatchNoop(t *testing.T) {
+	h := testHandler()
+	req := httptest.NewRequest(http.MethodPost, "/placeholder/?delete", nil)
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/xml" {
+		t.Errorf("Content-Type = %q, want %q", got, "application/xml")
+	}
+
+	var result deleteResult
+	if err := xml.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal DeleteResult XML: %v; body: %s", err, rec.Body.String())
+	}
+}
+
 func TestGetObjectInvalidParametersReturn400(t *testing.T) {
 	cases := []struct {
 		name string

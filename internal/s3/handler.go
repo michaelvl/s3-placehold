@@ -26,15 +26,22 @@ func NewHandler(cfg config.Config, synthesizer synth.Synthesizer) *Handler {
 
 // ServeHTTP implements http.Handler.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	_, objectKey := splitPathStyle(r.URL.Path)
+	bucket, objectKey := splitPathStyle(r.URL.Path)
 
-	noQuery := len(r.URL.Query()) == 0
+	query := r.URL.Query()
+	noQuery := len(query) == 0
 
 	switch {
 	case r.Method == http.MethodGet && noQuery:
 		h.respondObject(w, objectKey, true)
 	case r.Method == http.MethodHead && noQuery:
 		h.respondObject(w, objectKey, false)
+	case r.Method == http.MethodGet && isListRequest(query):
+		h.respondListObjects(w, bucket)
+	case r.Method == http.MethodDelete && noQuery:
+		h.respondDeleteObject(w)
+	case r.Method == http.MethodPost && query.Has("delete"):
+		h.respondDeleteObjects(w)
 	default:
 		writeS3Error(w, http.StatusMethodNotAllowed, "MethodNotAllowed", "The specified method is not allowed against this resource.")
 	}
