@@ -1,0 +1,9 @@
+defaultBaseImage: gcr.io/distroless/static-debian12
+
+builds:
+  - id: s3-placehold
+    main: ./cmd/s3-placehold
+    ldflags:
+      - -s
+      - -w
+      - -X main.version={{index .Env "VERSION"}}

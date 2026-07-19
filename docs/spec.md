@@ -311,8 +311,12 @@ builds:
     ldflags:
       - -s
       - -w
-      - -X main.version={{.Version}}
+      - -X main.version={{index .Env "VERSION"}}
 ```
+
+`ko`'s ldflags templating only exposes `.Env` and `.Date` (no `.Version`/`.Commit`/etc., despite some ko docs implying otherwise), so the version is threaded through a `VERSION` environment variable rather than a ko-native git-describe field. `index .Env "VERSION"` degrades to an empty string when `VERSION` isn't set, so a bare `ko build ./cmd/s3-placehold` still succeeds — dot-access (`.Env.VERSION`) would instead fail the build outright if the variable is unset.
+
+`make image` (see `Makefile`) wraps this: it derives `VERSION` from `git describe --tags --always --dirty`, builds with `ko build --local`, and applies the OCI annotations below, loading the result into the local docker daemon for `docker run -p 9000:9000 <image>`.
 
 **OCI annotations** — set via `ko build --image-annotation` flags or equivalent in the build pipeline:
 
