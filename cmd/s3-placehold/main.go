@@ -27,7 +27,7 @@ func main() {
 	log.Printf("s3-placehold %s", version)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
-	if err := http.ListenAndServe(addr, handler); err != nil {
+	if err := http.ListenAndServe(addr, logRequests(handler)); err != nil {
 		log.Fatal(err)
 	}
 }
