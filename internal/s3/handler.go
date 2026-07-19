@@ -11,6 +11,7 @@ import (
 
 	"github.com/michaelvl/s3-placehold/internal/config"
 	"github.com/michaelvl/s3-placehold/internal/key"
+	"github.com/michaelvl/s3-placehold/internal/sigv4"
 	"github.com/michaelvl/s3-placehold/internal/synth"
 )
 
@@ -29,9 +30,16 @@ func NewHandler(cfg config.Config, synthesizer synth.Synthesizer) *Handler {
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	bucket, objectKey := splitRequestPath(r.Host, r.URL.Path)
 
-	if _, ok := h.cfg.Lookup(bucket); !ok {
+	bucketCfg, ok := h.cfg.Lookup(bucket)
+	if !ok {
 		writeS3Error(w, http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist.")
 		return
+	}
+
+	if bucketCfg.Mode == config.ModePrivate {
+		if !h.authorize(w, r) {
+			return
+		}
 	}
 
 	query := r.URL.Query()
@@ -50,6 +58,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.respondDeleteObjects(w)
 	default:
 		writeS3Error(w, http.StatusMethodNotAllowed, "MethodNotAllowed", "The specified method is not allowed against this resource.")
+	}
+}
+
+// authorize validates the SigV4 signature on a request to a private
+// bucket, writing the appropriate S3 error and returning false on failure.
+func (h *Handler) authorize(w http.ResponseWriter, r *http.Request) bool {
+	creds := sigv4.Credentials{AccessKeyID: h.cfg.AccessKeyID, SecretAccessKey: h.cfg.SecretAccessKey}
+	switch err := sigv4.Verify(r, creds); err {
+	case nil:
+		return true
+	case sigv4.ErrMissingAuthorization:
+		writeS3Error(w, http.StatusForbidden, "AccessDenied", "Access Denied")
+		return false
+	default:
+		writeS3Error(w, http.StatusForbidden, "SignatureDoesNotMatch", "The request signature we calculated does not match the signature you provided.")
+		return false
 	}
 }
 

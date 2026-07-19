@@ -346,17 +346,29 @@ func TestVirtualHostedStyleResolvesBucketAndKey(t *testing.T) {
 }
 
 func TestPathStyleResolvesEitherConfiguredBucket(t *testing.T) {
-	for _, bucket := range []string{"images", "assets"} {
-		t.Run(bucket, func(t *testing.T) {
+	// The public bucket resolves and dispatches normally. The private
+	// bucket also resolves by path style (no NoSuchBucket), but this
+	// unauthenticated request is rejected by auth (see internal/s3/sigv4_test.go
+	// for the private-bucket auth acceptance criteria).
+	cases := []struct {
+		bucket   string
+		wantCode int
+	}{
+		{"images", http.StatusOK},
+		{"assets", http.StatusForbidden},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.bucket, func(t *testing.T) {
 			h := testMultiBucketHandler()
-			req := httptest.NewRequest(http.MethodGet, "/"+bucket+"/", nil)
+			req := httptest.NewRequest(http.MethodGet, "/"+tc.bucket+"/", nil)
 			req.Host = "localhost"
 			rec := httptest.NewRecorder()
 
 			h.ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+			if rec.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d; body: %s", rec.Code, tc.wantCode, rec.Body.String())
 			}
 		})
 	}
