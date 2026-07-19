@@ -104,20 +104,27 @@ func hmacSum(key []byte, data string) []byte {
 func encodePath(path string) string {
 	segments := strings.Split(path, "/")
 	for i, seg := range segments {
-		var b strings.Builder
-		for j := 0; j < len(seg); j++ {
-			c := seg[j]
-			if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-				c == '-' || c == '_' || c == '.' || c == '~' {
-				b.WriteByte(c)
-			} else {
-				b.WriteByte('%')
-				b.WriteString(strings.ToUpper(hex.EncodeToString([]byte{c})))
-			}
-		}
-		segments[i] = b.String()
+		segments[i] = encodeComponent(seg)
 	}
 	return strings.Join(segments, "/")
+}
+
+// encodeComponent percent-encodes a single path segment or query-string key
+// or value per SigV4 rules (unreserved characters pass through; everything
+// else is percent-encoded with uppercase hex).
+func encodeComponent(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+			c == '-' || c == '_' || c == '.' || c == '~' {
+			b.WriteByte(c)
+		} else {
+			b.WriteByte('%')
+			b.WriteString(strings.ToUpper(hex.EncodeToString([]byte{c})))
+		}
+	}
+	return b.String()
 }
 
 func signedHeadersRequest() *http.Request {

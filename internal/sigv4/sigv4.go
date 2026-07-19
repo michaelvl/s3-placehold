@@ -27,6 +27,10 @@ var ErrSignatureMismatch = errors.New("sigv4: signature does not match")
 // with no body (every operation this server signs is GET/HEAD).
 const emptyPayloadHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
+// unsignedPayload is the reserved payload-hash sentinel used in the
+// canonical request for query-string (presigned URL) signing, per SigV4.
+const unsignedPayload = "UNSIGNED-PAYLOAD"
+
 // Credentials is the single configured access/secret key pair signatures
 // are validated against.
 type Credentials struct {
@@ -58,16 +62,26 @@ func Verify(req *http.Request, creds Credentials) error {
 	if err != nil {
 		return ErrSignatureMismatch
 	}
+
+	amzDate := req.Header.Get("X-Amz-Date")
+	canonicalRequest := buildCanonicalRequest(req, signedHeaders)
+	return checkSignature(creds, scope, amzDate, canonicalRequest, signature)
+}
+
+// checkSignature validates that scope's access key matches creds and that
+// amzDate is consistent with scope's date, then computes the expected SigV4
+// signature for canonicalRequest and compares it against signature. It is
+// the common tail shared by header-based and query-string (presigned)
+// verification, which differ only in where scope, amzDate, canonicalRequest,
+// and signature are sourced from.
+func checkSignature(creds Credentials, scope credentialScope, amzDate, canonicalRequest, signature string) error {
 	if scope.accessKeyID != creds.AccessKeyID {
 		return ErrSignatureMismatch
 	}
-
-	amzDate := req.Header.Get("X-Amz-Date")
 	if len(amzDate) < 8 || amzDate[:8] != scope.date {
 		return ErrSignatureMismatch
 	}
 
-	canonicalRequest := buildCanonicalRequest(req, signedHeaders)
 	stringToSign := buildStringToSign(amzDate, scope, canonicalRequest)
 	signingKey := deriveSigningKey(creds.SecretAccessKey, scope.date, scope.region, scope.service)
 	expected := hex.EncodeToString(hmacSHA256(signingKey, stringToSign))
@@ -97,11 +111,11 @@ func parseAuthorization(header string) (credentialScope, []string, string, error
 		}
 		switch key {
 		case "Credential":
-			fields := strings.Split(value, "/")
-			if len(fields) != 5 || fields[4] != "aws4_request" {
-				return credentialScope{}, nil, "", errors.New("sigv4: malformed credential scope")
+			var err error
+			scope, err = parseCredential(value)
+			if err != nil {
+				return credentialScope{}, nil, "", err
 			}
-			scope = credentialScope{accessKeyID: fields[0], date: fields[1], region: fields[2], service: fields[3]}
 		case "SignedHeaders":
 			signedHeaders = strings.Split(value, ";")
 		case "Signature":
@@ -115,6 +129,73 @@ func parseAuthorization(header string) (credentialScope, []string, string, error
 		return credentialScope{}, nil, "", errors.New("sigv4: incomplete authorization header")
 	}
 	return scope, signedHeaders, signature, nil
+}
+
+// parseCredential parses a Credential value shared by both the Authorization
+// header and the X-Amz-Credential query parameter:
+// <access-key>/<date>/<region>/<service>/aws4_request.
+func parseCredential(value string) (credentialScope, error) {
+	fields := strings.Split(value, "/")
+	if len(fields) != 5 || fields[4] != "aws4_request" {
+		return credentialScope{}, errors.New("sigv4: malformed credential scope")
+	}
+	return credentialScope{accessKeyID: fields[0], date: fields[1], region: fields[2], service: fields[3]}, nil
+}
+
+// VerifyPresigned validates a presigned URL's query-string SigV4 signature
+// (X-Amz-Signature, X-Amz-Credential, X-Amz-Date, and — if present —
+// X-Amz-SignedHeaders) against creds. It returns nil if the signature is
+// valid, or ErrSignatureMismatch for any failure: no X-Amz-Signature
+// parameter, a malformed or unknown credential, or a signature that does not
+// match the request. Callers are expected to have already detected the
+// request as presigned (X-Amz-Signature present) before calling this.
+func VerifyPresigned(req *http.Request, creds Credentials) error {
+	query := req.URL.Query()
+
+	signature := query.Get("X-Amz-Signature")
+	if signature == "" {
+		return ErrSignatureMismatch
+	}
+
+	scope, err := parseCredential(query.Get("X-Amz-Credential"))
+	if err != nil {
+		return ErrSignatureMismatch
+	}
+
+	signedHeaders := []string{"host"}
+	if sh := query.Get("X-Amz-SignedHeaders"); sh != "" {
+		signedHeaders = strings.Split(sh, ";")
+	}
+
+	amzDate := query.Get("X-Amz-Date")
+	canonicalRequest := buildPresignedCanonicalRequest(req, query, signedHeaders)
+	return checkSignature(creds, scope, amzDate, canonicalRequest, signature)
+}
+
+// buildPresignedCanonicalRequest assembles the SigV4 canonical request
+// string for a presigned URL request: like buildCanonicalRequest, but the
+// query string excludes X-Amz-Signature (added to the URL only after
+// signing) and the payload hash is the "UNSIGNED-PAYLOAD" sentinel rather
+// than a hash of the (nonexistent) body.
+func buildPresignedCanonicalRequest(req *http.Request, query url.Values, signedHeaders []string) string {
+	headerBlock, signedHeadersStr := canonicalHeaders(req, signedHeaders)
+
+	toSign := url.Values{}
+	for k, v := range query {
+		if k == "X-Amz-Signature" {
+			continue
+		}
+		toSign[k] = v
+	}
+
+	return strings.Join([]string{
+		req.Method,
+		canonicalURIPath(req.URL.Path),
+		canonicalQueryString(toSign),
+		headerBlock,
+		signedHeadersStr,
+		unsignedPayload,
+	}, "\n")
 }
 
 // buildCanonicalRequest assembles the SigV4 canonical request string for

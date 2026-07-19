@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sort"
 	"strings"
 	"testing"
@@ -221,6 +222,140 @@ func TestVerifyWrongSecretRejected(t *testing.T) {
 
 	if err := Verify(req, testCreds()); err != ErrSignatureMismatch {
 		t.Fatalf("Verify() = %v, want ErrSignatureMismatch", err)
+	}
+}
+
+// refCanonicalQueryValues reimplements SigV4's canonical query string rule
+// directly over decoded url.Values, independently of sigv4.go's
+// canonicalQueryString, mirroring the shape presigned URL query parameters
+// actually take (a decoded value set, not a raw query string).
+func refCanonicalQueryValues(query url.Values) string {
+	pairs := make([]string, 0, len(query))
+	for k, values := range query {
+		for _, v := range values {
+			pairs = append(pairs, refEncodeComponent(k)+"="+refEncodeComponent(v))
+		}
+	}
+	sort.Strings(pairs)
+	return strings.Join(pairs, "&")
+}
+
+// presignedRequest builds a correctly-signed presigned-URL GET/HEAD request
+// fixture, signing only the "host" header and using the "UNSIGNED-PAYLOAD"
+// sentinel payload hash, per SigV4's query-string signing variant.
+func presignedRequest(t *testing.T, method, path, host, expires string) *http.Request {
+	t.Helper()
+	dateStamp := testDate[:8]
+	scope := dateStamp + "/" + testRegion + "/" + testService + "/aws4_request"
+
+	query := url.Values{}
+	query.Set("X-Amz-Algorithm", "AWS4-HMAC-SHA256")
+	query.Set("X-Amz-Credential", testAccessKeyID+"/"+scope)
+	query.Set("X-Amz-Date", testDate)
+	query.Set("X-Amz-Expires", expires)
+	query.Set("X-Amz-SignedHeaders", "host")
+
+	canonicalRequest := strings.Join([]string{
+		method,
+		refEncodePath(path),
+		refCanonicalQueryValues(query),
+		"host:" + host + "\n",
+		"host",
+		"UNSIGNED-PAYLOAD",
+	}, "\n")
+
+	hashedCR := sha256.Sum256([]byte(canonicalRequest))
+	stringToSign := strings.Join([]string{
+		"AWS4-HMAC-SHA256",
+		testDate,
+		scope,
+		hex.EncodeToString(hashedCR[:]),
+	}, "\n")
+
+	kDate := hmacSum([]byte("AWS4"+testSecretAccessKey), dateStamp)
+	kRegion := hmacSum(kDate, testRegion)
+	kService := hmacSum(kRegion, testService)
+	kSigning := hmacSum(kService, "aws4_request")
+	signature := hex.EncodeToString(hmacSum(kSigning, stringToSign))
+
+	query.Set("X-Amz-Signature", signature)
+
+	req := httptest.NewRequest(method, path+"?"+query.Encode(), nil)
+	req.Host = host
+	return req
+}
+
+func TestVerifyPresignedAcceptsCorrectlySignedRequest(t *testing.T) {
+	req := presignedRequest(t, http.MethodGet, "/assets/format=png", "localhost", "300")
+
+	if err := VerifyPresigned(req, testCreds()); err != nil {
+		t.Fatalf("VerifyPresigned() = %v, want nil", err)
+	}
+}
+
+func TestVerifyPresignedAcceptsHeadRequest(t *testing.T) {
+	req := presignedRequest(t, http.MethodHead, "/assets/format=png", "localhost", "300")
+
+	if err := VerifyPresigned(req, testCreds()); err != nil {
+		t.Fatalf("VerifyPresigned() = %v, want nil", err)
+	}
+}
+
+func TestVerifyPresignedTamperedSignatureRejected(t *testing.T) {
+	req := presignedRequest(t, http.MethodGet, "/assets/format=png", "localhost", "300")
+
+	q := req.URL.Query()
+	sig := q.Get("X-Amz-Signature")
+	last := sig[len(sig)-1]
+	repl := byte('0')
+	if last == '0' {
+		repl = '1'
+	}
+	q.Set("X-Amz-Signature", sig[:len(sig)-1]+string(repl))
+	req.URL.RawQuery = q.Encode()
+
+	if err := VerifyPresigned(req, testCreds()); err != ErrSignatureMismatch {
+		t.Fatalf("VerifyPresigned() = %v, want ErrSignatureMismatch", err)
+	}
+}
+
+func TestVerifyPresignedTamperedPathRejected(t *testing.T) {
+	req := presignedRequest(t, http.MethodGet, "/assets/format=png", "localhost", "300")
+	req.URL.Path = "/assets/format=jpeg"
+
+	if err := VerifyPresigned(req, testCreds()); err != ErrSignatureMismatch {
+		t.Fatalf("VerifyPresigned() = %v, want ErrSignatureMismatch", err)
+	}
+}
+
+func TestVerifyPresignedMissingSignatureRejected(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/assets/format=png", nil)
+	req.Host = "localhost"
+
+	if err := VerifyPresigned(req, testCreds()); err != ErrSignatureMismatch {
+		t.Fatalf("VerifyPresigned() = %v, want ErrSignatureMismatch", err)
+	}
+}
+
+func TestVerifyPresignedUnknownAccessKeyRejected(t *testing.T) {
+	req := presignedRequest(t, http.MethodGet, "/assets/format=png", "localhost", "300")
+	q := req.URL.Query()
+	q.Set("X-Amz-Credential", "SOMEOTHERKEY0000000AA/"+testDate[:8]+"/"+testRegion+"/"+testService+"/aws4_request")
+	req.URL.RawQuery = q.Encode()
+
+	if err := VerifyPresigned(req, testCreds()); err != ErrSignatureMismatch {
+		t.Fatalf("VerifyPresigned() = %v, want ErrSignatureMismatch", err)
+	}
+}
+
+func TestVerifyPresignedMalformedCredentialRejected(t *testing.T) {
+	req := presignedRequest(t, http.MethodGet, "/assets/format=png", "localhost", "300")
+	q := req.URL.Query()
+	q.Set("X-Amz-Credential", "onlyaccesskey")
+	req.URL.RawQuery = q.Encode()
+
+	if err := VerifyPresigned(req, testCreds()); err != ErrSignatureMismatch {
+		t.Fatalf("VerifyPresigned() = %v, want ErrSignatureMismatch", err)
 	}
 }
 

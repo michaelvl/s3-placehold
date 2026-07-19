@@ -36,19 +36,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	query := r.URL.Query()
+	presigned := query.Has("X-Amz-Signature")
+
 	if bucketCfg.Mode == config.ModePrivate {
-		if !h.authorize(w, r) {
+		if !h.authorize(w, r, presigned) {
 			return
 		}
 	}
 
-	query := r.URL.Query()
 	noQuery := len(query) == 0
 
 	switch {
-	case r.Method == http.MethodGet && noQuery:
+	case r.Method == http.MethodGet && (noQuery || presigned):
 		h.respondObject(w, objectKey, true)
-	case r.Method == http.MethodHead && noQuery:
+	case r.Method == http.MethodHead && (noQuery || presigned):
 		h.respondObject(w, objectKey, false)
 	case r.Method == http.MethodGet && isListRequest(query):
 		h.respondListObjects(w, bucket)
@@ -63,8 +65,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // authorize validates the SigV4 signature on a request to a private
 // bucket, writing the appropriate S3 error and returning false on failure.
-func (h *Handler) authorize(w http.ResponseWriter, r *http.Request) bool {
+// presigned selects query-string (presigned URL) validation over the
+// default Authorization-header validation.
+func (h *Handler) authorize(w http.ResponseWriter, r *http.Request, presigned bool) bool {
 	creds := sigv4.Credentials{AccessKeyID: h.cfg.AccessKeyID, SecretAccessKey: h.cfg.SecretAccessKey}
+
+	if presigned {
+		if err := sigv4.VerifyPresigned(r, creds); err != nil {
+			writeS3Error(w, http.StatusForbidden, "SignatureDoesNotMatch", "The request signature we calculated does not match the signature you provided.")
+			return false
+		}
+		return true
+	}
+
 	switch err := sigv4.Verify(r, creds); err {
 	case nil:
 		return true
