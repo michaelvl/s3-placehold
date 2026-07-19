@@ -28,6 +28,14 @@ func NewHandler(cfg config.Config, synthesizer synth.Synthesizer) *Handler {
 
 // ServeHTTP implements http.Handler.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Expose-Headers", "ETag, Content-Type, Content-Length, x-amz-request-id")
+
+	if r.Method == http.MethodOptions {
+		respondPreflight(w)
+		return
+	}
+
 	bucket, objectKey := splitRequestPath(r.Host, r.URL.Path)
 
 	bucketCfg, ok := h.cfg.Lookup(bucket)
@@ -113,6 +121,16 @@ func (h *Handler) respondObject(w http.ResponseWriter, objectKey string, include
 	if includeBody {
 		_, _ = w.Write(data)
 	}
+}
+
+// respondPreflight writes the 200 OK, no-body response to a CORS preflight
+// OPTIONS request, ahead of bucket lookup and auth so preflight succeeds
+// even for an unconfigured or private bucket.
+func respondPreflight(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, DELETE, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, x-amz-date, x-amz-content-sha256, x-amz-security-token, x-amz-user-agent")
+	w.Header().Set("Access-Control-Max-Age", "3600")
+	w.WriteHeader(http.StatusOK)
 }
 
 // writeInvalidArgument writes an InvalidArgument 400 whose message is the
