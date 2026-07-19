@@ -3,6 +3,7 @@ package synth
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/michaelvl/s3-placehold/internal/key"
 )
@@ -44,5 +45,29 @@ func TestRouterUnknownType(t *testing.T) {
 	}
 	if !errors.Is(err, ErrUnknownType) {
 		t.Errorf("err = %v, want wrapping ErrUnknownType", err)
+	}
+}
+
+func TestDelayDurationFixed(t *testing.T) {
+	got := DelayDuration(200*time.Millisecond, 200*time.Millisecond)
+	if got != 200*time.Millisecond {
+		t.Errorf("DelayDuration = %v, want 200ms", got)
+	}
+}
+
+func TestDelayDurationZero(t *testing.T) {
+	got := DelayDuration(0, 0)
+	if got != 0 {
+		t.Errorf("DelayDuration = %v, want 0", got)
+	}
+}
+
+func TestDelayDurationRangeStaysWithinBounds(t *testing.T) {
+	min, max := 100*time.Millisecond, 500*time.Millisecond
+	for i := 0; i < 100; i++ {
+		got := DelayDuration(min, max)
+		if got < min || got > max {
+			t.Fatalf("DelayDuration = %v, want within [%v, %v]", got, min, max)
+		}
 	}
 }

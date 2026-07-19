@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/michaelvl/s3-placehold/internal/config"
 	"github.com/michaelvl/s3-placehold/internal/key"
@@ -42,11 +43,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // respondObject synthesizes objectKey and writes the response headers,
 // including the body only when includeBody is set (GetObject vs HeadObject).
 func (h *Handler) respondObject(w http.ResponseWriter, objectKey string, includeBody bool) {
-	data, mimeType, err := h.synthesize(objectKey)
+	params, err := key.Parse(objectKey)
 	if err != nil {
-		writeS3Error(w, http.StatusBadRequest, "InvalidArgument", err.Error())
+		writeInvalidArgument(w, err)
 		return
 	}
+
+	data, mimeType, err := h.synth.Synthesize(params)
+	if err != nil {
+		writeInvalidArgument(w, err)
+		return
+	}
+
+	time.Sleep(synth.DelayDuration(params.DelayMin, params.DelayMax))
+
 	w.Header().Set("Content-Type", mimeType)
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	w.WriteHeader(http.StatusOK)
@@ -55,12 +65,10 @@ func (h *Handler) respondObject(w http.ResponseWriter, objectKey string, include
 	}
 }
 
-func (h *Handler) synthesize(objectKey string) (data []byte, mimeType string, err error) {
-	params, err := key.Parse(objectKey)
-	if err != nil {
-		return nil, "", err
-	}
-	return h.synth.Synthesize(params)
+// writeInvalidArgument writes an InvalidArgument 400 whose message is the
+// given error's text.
+func writeInvalidArgument(w http.ResponseWriter, err error) {
+	writeS3Error(w, http.StatusBadRequest, "InvalidArgument", err.Error())
 }
 
 // splitPathStyle extracts the bucket name and object key from a path-style

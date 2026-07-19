@@ -5,6 +5,8 @@ package synth
 import (
 	"errors"
 	"fmt"
+	"math/rand"
+	"time"
 
 	"github.com/michaelvl/s3-placehold/internal/key"
 )
@@ -36,4 +38,14 @@ func (r *Router) Synthesize(params key.Params) (data []byte, mimeType string, er
 	default:
 		return nil, "", fmt.Errorf("%w: %q", ErrUnknownType, params.Type)
 	}
+}
+
+// DelayDuration returns the duration to sleep for the given range: exactly
+// lo when hi <= lo (the fixed-delay case), otherwise a random duration
+// drawn from the inclusive range [lo, hi].
+func DelayDuration(lo, hi time.Duration) time.Duration {
+	if hi <= lo {
+		return lo
+	}
+	return lo + time.Duration(rand.Int63n(int64(hi-lo)+1))
 }
