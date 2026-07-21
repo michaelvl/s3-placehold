@@ -13,7 +13,6 @@ docker-compose stack.
 ## Quick start
 
 ```sh
-make image
 docker run --rm -p 9000:9000 \
   -e BUCKETS=images:public,assets:private \
   -e AWS_ACCESS_KEY_ID=demo \
