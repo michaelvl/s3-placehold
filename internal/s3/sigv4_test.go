@@ -14,6 +14,7 @@ import (
 
 	"github.com/michaelvl/s3-placehold/internal/config"
 	"github.com/michaelvl/s3-placehold/internal/image"
+	"github.com/michaelvl/s3-placehold/internal/key"
 	"github.com/michaelvl/s3-placehold/internal/synth"
 )
 
@@ -39,6 +40,8 @@ func testPrivateBucketHandler() *Handler {
 		},
 		AccessKeyID:     testAccessKeyID,
 		SecretAccessKey: testSecretAccessKey,
+		MaxWidth:        key.DefaultMaxWidth,
+		MaxHeight:       key.DefaultMaxHeight,
 	}
 	router := synth.NewRouter(image.New())
 	return NewHandler(cfg, router)

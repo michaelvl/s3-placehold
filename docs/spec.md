@@ -46,9 +46,9 @@ value    = [^/,=]+
 |---|---|---|---|
 | `type` | `image` | `image` | Routes to synthesis pipeline. Only `image` is in scope for this spec. Unknown values → `InvalidArgument` 400. |
 | `format` | `svg` \| `png` \| `jpeg` | `svg` | Output format for `type=image`. Other values → `InvalidArgument` 400. |
-| `size` | `{W}x{H}` e.g. `200x300` | `100x100` | Width × height in pixels. Non-integer or non-positive values → `InvalidArgument` 400. |
+| `size` | `{W}x{H}` e.g. `200x300` | `100x100` | Width × height in pixels, each capped independently by `MAX_X_PIXELS`/`MAX_Y_PIXELS` (§8; default `10000` each). Non-integer, non-positive, or over-limit values → `InvalidArgument` 400. |
 | `colour` | Lowercase hex without `#` e.g. `ff0000`, **or** a single-word CSS named colour e.g. `lightblue` | `cccccc` | Background fill colour. Unrecognised value → `InvalidArgument` 400. |
-| `text` | URL-encoded string; `+` represents a space | *(no overlay)* | Text drawn on the image. Unconstrained length; colour is auto-contrasted against the background. |
+| `text` | URL-encoded string; `+` represents a space | *(no overlay)* | Text drawn centered on the image. Font size auto-scales to fill ~90% of the image width, capped at ~80% of the image height. Unconstrained length; colour is auto-contrasted against the background. |
 | `delay` | Fixed ms: `200`; random range: `100,500` | *(no delay)* | Server sleeps before responding. Unit: milliseconds. Two comma-separated values are treated as an inclusive range from which a random duration is drawn. |
 
 ---
@@ -190,6 +190,8 @@ All configuration is via environment variables. No config file, no flags.
 | `BUCKETS` | Comma-separated `name:mode` pairs | `placeholder:public` |
 | `AWS_ACCESS_KEY_ID` | SigV4 access key (required when any bucket is `private`) | *(none)* |
 | `AWS_SECRET_ACCESS_KEY` | SigV4 secret key (required when any bucket is `private`) | *(none)* |
+| `MAX_X_PIXELS` | Maximum allowed `size` width, in pixels | `10000` |
+| `MAX_Y_PIXELS` | Maximum allowed `size` height, in pixels | `10000` |
 
 **`BUCKETS` format:** each entry is `name:public` or `name:private`. Multiple buckets are comma-separated.
 

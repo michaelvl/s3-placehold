@@ -13,7 +13,7 @@ import (
 func TestLogRequestsLogsMethodHostURIStatusAndSize(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("not found"))
+		_, _ = w.Write([]byte("not found"))
 	})
 
 	var buf bytes.Buffer
@@ -36,7 +36,7 @@ func TestLogRequestsLogsMethodHostURIStatusAndSize(t *testing.T) {
 
 func TestLogRequestsDefaultsToStatus200WhenWriteHeaderNotCalled(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	})
 
 	var buf bytes.Buffer

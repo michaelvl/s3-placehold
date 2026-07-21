@@ -25,6 +25,14 @@ type Params struct {
 	DelayMax time.Duration
 }
 
+// Default upper bounds on requested image dimensions, used by Parse. Callers
+// that need different bounds (e.g. from configuration) should use
+// ParseWithLimits directly.
+const (
+	DefaultMaxWidth  = 10000
+	DefaultMaxHeight = 10000
+)
+
 // Default returns the parameter set used when a key carries no segments.
 func Default() Params {
 	return Params{
@@ -37,18 +45,26 @@ func Default() Params {
 }
 
 func invalidParam(name, value string) error {
-	return fmt.Errorf("Invalid value for parameter '%s': '%s'", name, value)
+	return fmt.Errorf("Invalid value for parameter '%s': '%s'", name, value) //nolint:staticcheck // ST1005: wording fixed by API contract, see docs/spec.md
 }
 
 func invalidSegment(seg string) error {
-	return fmt.Errorf("Invalid key segment (missing '='): '%s'", seg)
+	return fmt.Errorf("Invalid key segment (missing '='): '%s'", seg) //nolint:staticcheck // ST1005: wording fixed by API contract, see docs/spec.md
 }
 
-// Parse parses an S3 key string into Params. A key with no segments yields
+// Parse parses an S3 key string into Params using the default size bounds
+// (DefaultMaxWidth, DefaultMaxHeight). A key with no segments yields
 // Default(). Segments are `/`-separated `name=value` pairs, in any order,
 // with `,`-separated multi-values and percent-decoding applied to names and
 // values.
 func Parse(rawKey string) (Params, error) {
+	return ParseWithLimits(rawKey, DefaultMaxWidth, DefaultMaxHeight)
+}
+
+// ParseWithLimits parses an S3 key string into Params, rejecting a `size`
+// segment whose width or height exceeds maxWidth or maxHeight. See Parse for
+// the key grammar.
+func ParseWithLimits(rawKey string, maxWidth, maxHeight int) (Params, error) {
 	p := Default()
 
 	trimmed := strings.Trim(rawKey, "/")
@@ -76,7 +92,7 @@ func Parse(rawKey string) (Params, error) {
 			return Params{}, invalidParam(name, rawValue)
 		}
 
-		if err := applySegment(&p, name, values); err != nil {
+		if err := applySegment(&p, name, values, maxWidth, maxHeight); err != nil {
 			return Params{}, err
 		}
 	}
@@ -99,14 +115,14 @@ func decodeValues(rawValue string) ([]string, error) {
 
 // applySegment validates and applies a single decoded name/values pair to p.
 // Unrecognised segment names are ignored for forward compatibility.
-func applySegment(p *Params, name string, values []string) error {
+func applySegment(p *Params, name string, values []string, maxWidth, maxHeight int) error {
 	switch name {
 	case "type":
 		return applySingleValue(values, name, func(v string) error { return applyType(p, v) })
 	case "format":
 		return applySingleValue(values, name, func(v string) error { return applyFormat(p, v) })
 	case "size":
-		return applySingleValue(values, name, func(v string) error { return applySize(p, v) })
+		return applySingleValue(values, name, func(v string) error { return applySize(p, v, maxWidth, maxHeight) })
 	case "colour":
 		return applySingleValue(values, name, func(v string) error { return applyColour(p, v) })
 	case "text":
@@ -145,14 +161,14 @@ func applyFormat(p *Params, v string) error {
 	}
 }
 
-func applySize(p *Params, v string) error {
+func applySize(p *Params, v string, maxWidth, maxHeight int) error {
 	wStr, hStr, ok := strings.Cut(v, "x")
 	if !ok {
 		return invalidParam("size", v)
 	}
 	w, errW := strconv.Atoi(wStr)
 	h, errH := strconv.Atoi(hStr)
-	if errW != nil || errH != nil || w <= 0 || h <= 0 {
+	if errW != nil || errH != nil || w <= 0 || h <= 0 || w > maxWidth || h > maxHeight {
 		return invalidParam("size", v)
 	}
 	p.Width = w

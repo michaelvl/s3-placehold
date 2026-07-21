@@ -1,6 +1,7 @@
 package key
 
 import (
+	"fmt"
 	"image/color"
 	"testing"
 	"time"
@@ -154,6 +155,25 @@ func TestParseInvalidSizeNonPositive(t *testing.T) {
 		if _, err := Parse("/size=" + v); err == nil {
 			t.Errorf("Parse(size=%s) = nil error, want error", v)
 		}
+	}
+}
+
+func TestParseRejectsSizeOverDefaultMax(t *testing.T) {
+	_, err := Parse(fmt.Sprintf("/size=%dx100", DefaultMaxWidth+1))
+	if err == nil {
+		t.Fatalf("Parse(size over DefaultMaxWidth) = nil error, want error")
+	}
+}
+
+func TestParseWithLimitsBoundary(t *testing.T) {
+	if _, err := ParseWithLimits("/size=500x300", 500, 300); err != nil {
+		t.Errorf("ParseWithLimits at exactly the limit returned error: %v", err)
+	}
+	if _, err := ParseWithLimits("/size=501x300", 500, 300); err == nil {
+		t.Errorf("ParseWithLimits(width over max) = nil error, want error")
+	}
+	if _, err := ParseWithLimits("/size=500x301", 500, 300); err == nil {
+		t.Errorf("ParseWithLimits(height over max) = nil error, want error")
 	}
 }
 

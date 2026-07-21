@@ -16,6 +16,10 @@ build:
 test:
 	go test ./...
 
+.PHONY: lint
+lint:
+	golangci-lint run
+
 # Builds a distroless container image via ko and loads it into the local
 # docker daemon, e.g. `docker run -p 9000:9000 ko.local/s3-placehold-...`.
 .PHONY: image

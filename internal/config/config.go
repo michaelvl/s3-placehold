@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/michaelvl/s3-placehold/internal/key"
 )
 
 // BucketMode is the auth mode a bucket is configured with.
@@ -28,6 +30,8 @@ type Config struct {
 	Buckets         []BucketConfig
 	AccessKeyID     string
 	SecretAccessKey string
+	MaxWidth        int
+	MaxHeight       int
 }
 
 const (
@@ -63,7 +67,33 @@ func Load() (Config, error) {
 	}
 	cfg.Buckets = buckets
 
+	maxWidth, err := parseMaxPixels("MAX_X_PIXELS", key.DefaultMaxWidth)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.MaxWidth = maxWidth
+
+	maxHeight, err := parseMaxPixels("MAX_Y_PIXELS", key.DefaultMaxHeight)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.MaxHeight = maxHeight
+
 	return cfg, nil
+}
+
+// parseMaxPixels parses an env var holding a positive pixel-dimension cap,
+// returning def if the var is unset.
+func parseMaxPixels(envVar string, def int) (int, error) {
+	raw := os.Getenv(envVar)
+	if raw == "" {
+		return def, nil
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return 0, fmt.Errorf("invalid %s %q: must be a positive integer", envVar, raw)
+	}
+	return v, nil
 }
 
 // Lookup returns the BucketConfig for name and whether it is configured.

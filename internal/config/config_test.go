@@ -1,12 +1,18 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/michaelvl/s3-placehold/internal/key"
+)
 
 func TestLoadZeroConfigDefault(t *testing.T) {
 	t.Setenv("PORT", "")
 	t.Setenv("BUCKETS", "")
 	t.Setenv("AWS_ACCESS_KEY_ID", "")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	t.Setenv("MAX_X_PIXELS", "")
+	t.Setenv("MAX_Y_PIXELS", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -24,6 +30,40 @@ func TestLoadZeroConfigDefault(t *testing.T) {
 	}
 	if cfg.Buckets[0].Mode != ModePublic {
 		t.Errorf("Buckets[0].Mode = %q, want %q", cfg.Buckets[0].Mode, ModePublic)
+	}
+	if cfg.MaxWidth != key.DefaultMaxWidth {
+		t.Errorf("MaxWidth = %d, want %d", cfg.MaxWidth, key.DefaultMaxWidth)
+	}
+	if cfg.MaxHeight != key.DefaultMaxHeight {
+		t.Errorf("MaxHeight = %d, want %d", cfg.MaxHeight, key.DefaultMaxHeight)
+	}
+}
+
+func TestLoadCustomMaxPixels(t *testing.T) {
+	t.Setenv("MAX_X_PIXELS", "500")
+	t.Setenv("MAX_Y_PIXELS", "300")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.MaxWidth != 500 {
+		t.Errorf("MaxWidth = %d, want 500", cfg.MaxWidth)
+	}
+	if cfg.MaxHeight != 300 {
+		t.Errorf("MaxHeight = %d, want 300", cfg.MaxHeight)
+	}
+}
+
+func TestLoadInvalidMaxPixels(t *testing.T) {
+	for _, envVar := range []string{"MAX_X_PIXELS", "MAX_Y_PIXELS"} {
+		t.Run(envVar, func(t *testing.T) {
+			t.Setenv(envVar, "abc")
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load with invalid %s = nil error, want error", envVar)
+			}
+		})
 	}
 }
 

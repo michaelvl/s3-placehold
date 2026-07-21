@@ -14,13 +14,16 @@ import (
 
 	"github.com/michaelvl/s3-placehold/internal/config"
 	"github.com/michaelvl/s3-placehold/internal/image"
+	"github.com/michaelvl/s3-placehold/internal/key"
 	"github.com/michaelvl/s3-placehold/internal/synth"
 )
 
 func testHandler() *Handler {
 	cfg := config.Config{
-		Port:    9000,
-		Buckets: []config.BucketConfig{{Name: "placeholder", Mode: config.ModePublic}},
+		Port:      9000,
+		Buckets:   []config.BucketConfig{{Name: "placeholder", Mode: config.ModePublic}},
+		MaxWidth:  key.DefaultMaxWidth,
+		MaxHeight: key.DefaultMaxHeight,
 	}
 	router := synth.NewRouter(image.New())
 	return NewHandler(cfg, router)
@@ -47,6 +50,35 @@ func TestGetObjectDefaultKey(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, `width="100"`) || !strings.Contains(body, "#cccccc") {
 		t.Errorf("unexpected body: %s", body)
+	}
+}
+
+func TestGetObjectSizeOverConfiguredMaxRejected(t *testing.T) {
+	cfg := config.Config{
+		Port:      9000,
+		Buckets:   []config.BucketConfig{{Name: "placeholder", Mode: config.ModePublic}},
+		MaxWidth:  500,
+		MaxHeight: 500,
+	}
+	router := synth.NewRouter(image.New())
+	h := NewHandler(cfg, router)
+
+	req := httptest.NewRequest(http.MethodGet, "/placeholder/size=600x100", nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rec.Code, rec.Body.String())
+	}
+
+	var errResp s3Error
+	if err := xml.Unmarshal(rec.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("failed to unmarshal error XML: %v; body: %s", err, rec.Body.String())
+	}
+	if errResp.Code != "InvalidArgument" {
+		t.Errorf("Code = %q, want %q", errResp.Code, "InvalidArgument")
 	}
 }
 
@@ -324,6 +356,8 @@ func testMultiBucketHandler() *Handler {
 			{Name: "images", Mode: config.ModePublic},
 			{Name: "assets", Mode: config.ModePrivate},
 		},
+		MaxWidth:  key.DefaultMaxWidth,
+		MaxHeight: key.DefaultMaxHeight,
 	}
 	router := synth.NewRouter(image.New())
 	return NewHandler(cfg, router)

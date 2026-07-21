@@ -118,6 +118,8 @@ All configuration is via environment variables:
 | `BUCKETS`               | Comma-separated `name:mode` pairs (`public`/`private`) | `placeholder:public` |
 | `AWS_ACCESS_KEY_ID`     | SigV4 access key (required if any bucket is `private`) | _(none)_             |
 | `AWS_SECRET_ACCESS_KEY` | SigV4 secret key (required if any bucket is `private`) | _(none)_             |
+| `MAX_X_PIXELS`          | Maximum allowed `size` width, in pixels                | `10000`              |
+| `MAX_Y_PIXELS`          | Maximum allowed `size` height, in pixels               | `10000`              |
 
 ## Key limitations vs. real AWS S3
 

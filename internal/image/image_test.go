@@ -152,6 +152,88 @@ func containsNonBackgroundPixel(img stdimage.Image, bg color.RGBA) bool {
 	return false
 }
 
+func TestFitFontSizeScalesWithWidth(t *testing.T) {
+	// Tall enough that the height cap never binds, isolating width scaling.
+	narrow := fitFontSize(100, 1000, "HELLO")
+	wide := fitFontSize(1000, 1000, "HELLO")
+	if !(narrow < wide) {
+		t.Errorf("fitFontSize(100,1000) = %v, want < fitFontSize(1000,1000) = %v", narrow, wide)
+	}
+}
+
+func TestFitFontSizeCappedByHeight(t *testing.T) {
+	// Very wide, short image: width is never the binding constraint, so the
+	// font size must not exceed heightFillRatio*height.
+	size := fitFontSize(100000, 50, "HELLO")
+	maxAllowed := 50.0 * heightFillRatio
+	if size > maxAllowed {
+		t.Errorf("fitFontSize(100000,50) = %v, want <= %v (heightFillRatio*height)", size, maxAllowed)
+	}
+}
+
+func TestSynthesizePNGTextSpansImageWidth(t *testing.T) {
+	s := New()
+	params := key.Default()
+	params.Format = "png"
+	params.Width = 200
+	params.Height = 1000 // tall enough that width, not height, is the binding constraint
+	params.Colour = color.RGBA{R: 0xff, A: 0xff}
+	params.Text = "HELLO"
+
+	data, _, err := s.Synthesize(params)
+	if err != nil {
+		t.Fatalf("Synthesize returned error: %v", err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("failed to decode PNG: %v", err)
+	}
+
+	minX, maxX := nonBackgroundColumnRange(img, params.Colour)
+	if minX == -1 {
+		t.Fatalf("no text pixels found")
+	}
+	span := maxX - minX
+	target := float64(params.Width) * widthFillRatio
+	if float64(span) < 0.5*target {
+		t.Errorf("text span = %d px, want at least half of target width %.0f (text should fill the image width)", span, target)
+	}
+	if float64(span) > target+5 {
+		t.Errorf("text span = %d px, want no more than target width %.0f (plus a small rendering margin)", span, target)
+	}
+}
+
+func nonBackgroundColumnRange(img stdimage.Image, bg color.RGBA) (minX, maxX int) {
+	minX, maxX = -1, -1
+	bounds := img.Bounds()
+	for x := bounds.Min.X; x < bounds.Max.X; x++ {
+		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+			r, g, b, _ := img.At(x, y).RGBA()
+			if uint8(r>>8) != bg.R || uint8(g>>8) != bg.G || uint8(b>>8) != bg.B {
+				if minX == -1 {
+					minX = x
+				}
+				maxX = x
+			}
+		}
+	}
+	return minX, maxX
+}
+
+func TestSynthesizeSVGTextIncludesFontSize(t *testing.T) {
+	s := New()
+	params := key.Default()
+	params.Text = "hello"
+
+	data, _, err := s.Synthesize(params)
+	if err != nil {
+		t.Fatalf("Synthesize returned error: %v", err)
+	}
+	if !strings.Contains(string(data), `font-size="`) {
+		t.Errorf("svg missing font-size attribute: %s", data)
+	}
+}
+
 func TestContrastColourAutoAdjusts(t *testing.T) {
 	darkText := contrastColour(color.RGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
 	if darkText != (color.RGBA{A: 0xff}) {

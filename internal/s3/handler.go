@@ -106,7 +106,7 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request, presigned bo
 // respondObject synthesizes objectKey and writes the response headers,
 // including the body only when includeBody is set (GetObject vs HeadObject).
 func (h *Handler) respondObject(w http.ResponseWriter, objectKey string, includeBody bool) {
-	params, err := key.Parse(objectKey)
+	params, err := key.ParseWithLimits(objectKey, h.cfg.MaxWidth, h.cfg.MaxHeight)
 	if err != nil {
 		writeInvalidArgument(w, err)
 		return
