@@ -483,3 +483,31 @@ func TestGetObjectDefaultDelayFromConfig(t *testing.T) {
 		t.Errorf("elapsed = %v, want >= 50ms", elapsed)
 	}
 }
+
+func TestGetObjectDefaultSizeFromConfig(t *testing.T) {
+	cfg := config.Config{
+		Port:          9000,
+		Buckets:       []config.BucketConfig{{Name: "placeholder", Mode: config.ModePublic}},
+		MaxWidth:      key.DefaultMaxWidth,
+		MaxHeight:     key.DefaultMaxHeight,
+		DefaultWidth:  800,
+		DefaultHeight: 600,
+	}
+	h := NewHandler(cfg, synth.NewRouter(image.New()))
+	req := httptest.NewRequest(http.MethodGet, "/placeholder/format=png", nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	img, err := png.Decode(bytes.NewReader(rec.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("failed to decode PNG: %v", err)
+	}
+	if img.Bounds().Dx() != 800 || img.Bounds().Dy() != 600 {
+		t.Errorf("dimensions = %dx%d, want 800x600", img.Bounds().Dx(), img.Bounds().Dy())
+	}
+}

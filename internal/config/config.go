@@ -33,6 +33,8 @@ type Config struct {
 	SecretAccessKey string
 	MaxWidth        int
 	MaxHeight       int
+	DefaultWidth    int
+	DefaultHeight   int
 	DefaultDelayMin time.Duration
 	DefaultDelayMax time.Duration
 }
@@ -82,6 +84,13 @@ func Load() (Config, error) {
 	}
 	cfg.MaxHeight = maxHeight
 
+	defWidth, defHeight, err := parseDefaultSize(cfg.MaxWidth, cfg.MaxHeight)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.DefaultWidth = defWidth
+	cfg.DefaultHeight = defHeight
+
 	delayMin, delayMax, err := parseDefaultDelay()
 	if err != nil {
 		return Config{}, err
@@ -90,6 +99,22 @@ func Load() (Config, error) {
 	cfg.DefaultDelayMax = delayMax
 
 	return cfg, nil
+}
+
+// parseDefaultSize parses DEFAULT_SIZE, the image dimensions used for
+// requests whose key carries no `size` segment. It accepts the same
+// `{width}x{height}` syntax as that segment, capped by maxWidth/maxHeight,
+// and falls back to the built-in 100x100 when unset.
+func parseDefaultSize(maxWidth, maxHeight int) (width, height int, err error) {
+	raw := os.Getenv("DEFAULT_SIZE")
+	if raw == "" {
+		return key.DefaultWidth, key.DefaultHeight, nil
+	}
+	w, h, ok := key.ParseSize(raw, maxWidth, maxHeight)
+	if !ok {
+		return 0, 0, fmt.Errorf("invalid DEFAULT_SIZE %q: must be {width}x{height} in pixels (\"100x100\"), within MAX_X_PIXELS/MAX_Y_PIXELS", raw)
+	}
+	return w, h, nil
 }
 
 // parseDefaultDelay parses DEFAULT_DELAY_MS, the delay applied to requests

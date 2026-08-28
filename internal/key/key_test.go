@@ -298,3 +298,57 @@ func TestParseDelayValues(t *testing.T) {
 		}
 	}
 }
+
+func TestParseWithOptionsDefaultSizeApplied(t *testing.T) {
+	opts := DefaultOptions()
+	opts.DefaultWidth, opts.DefaultHeight = 800, 600
+
+	got, err := ParseWithOptions("/format=png", opts)
+	if err != nil {
+		t.Fatalf("ParseWithOptions returned error: %v", err)
+	}
+	if got.Width != 800 || got.Height != 600 {
+		t.Errorf("Width/Height = %dx%d, want 800x600", got.Width, got.Height)
+	}
+}
+
+func TestParseWithOptionsSizeSegmentOverridesDefault(t *testing.T) {
+	opts := DefaultOptions()
+	opts.DefaultWidth, opts.DefaultHeight = 800, 600
+
+	got, err := ParseWithOptions("/size=200x300", opts)
+	if err != nil {
+		t.Fatalf("ParseWithOptions returned error: %v", err)
+	}
+	if got.Width != 200 || got.Height != 300 {
+		t.Errorf("Width/Height = %dx%d, want 200x300", got.Width, got.Height)
+	}
+}
+
+func TestParseWithOptionsZeroDefaultSizeFallsBack(t *testing.T) {
+	got, err := ParseWithOptions("/format=png", Options{MaxWidth: DefaultMaxWidth, MaxHeight: DefaultMaxHeight})
+	if err != nil {
+		t.Fatalf("ParseWithOptions returned error: %v", err)
+	}
+	if got.Width != DefaultWidth || got.Height != DefaultHeight {
+		t.Errorf("Width/Height = %dx%d, want %dx%d", got.Width, got.Height, DefaultWidth, DefaultHeight)
+	}
+}
+
+func TestParseSizeValues(t *testing.T) {
+	w, h, ok := ParseSize("200x300", DefaultMaxWidth, DefaultMaxHeight)
+	if !ok || w != 200 || h != 300 {
+		t.Errorf("ParseSize(200x300) = %d/%d/%v, want 200/300/true", w, h, ok)
+	}
+	for _, v := range []string{"200", "200x", "x300", "0x100", "100x0", "-1x100", "axb", "200x300x400"} {
+		if _, _, ok := ParseSize(v, DefaultMaxWidth, DefaultMaxHeight); ok {
+			t.Errorf("ParseSize(%q) = true, want false", v)
+		}
+	}
+	if _, _, ok := ParseSize("501x300", 500, 300); ok {
+		t.Errorf("ParseSize(over max width) = true, want false")
+	}
+	if _, _, ok := ParseSize("500x301", 500, 300); ok {
+		t.Errorf("ParseSize(over max height) = true, want false")
+	}
+}

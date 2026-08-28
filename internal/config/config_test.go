@@ -15,6 +15,7 @@ func TestLoadZeroConfigDefault(t *testing.T) {
 	t.Setenv("MAX_X_PIXELS", "")
 	t.Setenv("MAX_Y_PIXELS", "")
 	t.Setenv("DEFAULT_DELAY_MS", "")
+	t.Setenv("DEFAULT_SIZE", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -41,6 +42,9 @@ func TestLoadZeroConfigDefault(t *testing.T) {
 	}
 	if cfg.DefaultDelayMin != 0 || cfg.DefaultDelayMax != 0 {
 		t.Errorf("DefaultDelayMin/Max = %v/%v, want 0/0", cfg.DefaultDelayMin, cfg.DefaultDelayMax)
+	}
+	if cfg.DefaultWidth != key.DefaultWidth || cfg.DefaultHeight != key.DefaultHeight {
+		t.Errorf("DefaultWidth/Height = %dx%d, want %dx%d", cfg.DefaultWidth, cfg.DefaultHeight, key.DefaultWidth, key.DefaultHeight)
 	}
 }
 
@@ -167,5 +171,37 @@ func TestLoadInvalidDefaultDelay(t *testing.T) {
 		if _, err := Load(); err == nil {
 			t.Errorf("Load(DEFAULT_DELAY_MS=%s) = nil error, want error", v)
 		}
+	}
+}
+
+func TestLoadDefaultSize(t *testing.T) {
+	t.Setenv("DEFAULT_SIZE", "800x600")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.DefaultWidth != 800 || cfg.DefaultHeight != 600 {
+		t.Errorf("DefaultWidth/Height = %dx%d, want 800x600", cfg.DefaultWidth, cfg.DefaultHeight)
+	}
+}
+
+func TestLoadInvalidDefaultSize(t *testing.T) {
+	for _, v := range []string{"abc", "800", "800x", "0x100", "-1x100"} {
+		t.Setenv("DEFAULT_SIZE", v)
+		if _, err := Load(); err == nil {
+			t.Errorf("Load(DEFAULT_SIZE=%s) = nil error, want error", v)
+		}
+	}
+}
+
+func TestLoadDefaultSizeOverMaxPixels(t *testing.T) {
+	t.Setenv("MAX_X_PIXELS", "500")
+	t.Setenv("MAX_Y_PIXELS", "300")
+	t.Setenv("DEFAULT_SIZE", "800x600")
+
+	if _, err := Load(); err == nil {
+		t.Errorf("Load(DEFAULT_SIZE over MAX_X_PIXELS) = nil error, want error")
 	}
 }

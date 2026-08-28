@@ -33,20 +33,36 @@ const (
 	DefaultMaxHeight = 10000
 )
 
+// Default image dimensions, used when neither the key nor the server
+// configuration specifies a size.
+const (
+	DefaultWidth  = 100
+	DefaultHeight = 100
+)
+
 // Options carries server configuration into key parsing: the size caps a
-// `size` segment is checked against, and the delay applied to keys that carry
-// no `delay` segment.
+// `size` segment is checked against, and the size and delay applied to keys
+// that carry no `size` / `delay` segment. A zero DefaultWidth or
+// DefaultHeight means the built-in DefaultWidth/DefaultHeight; a zero delay
+// means no delay.
 type Options struct {
 	MaxWidth        int
 	MaxHeight       int
+	DefaultWidth    int
+	DefaultHeight   int
 	DefaultDelayMin time.Duration
 	DefaultDelayMax time.Duration
 }
 
 // DefaultOptions returns the options used by Parse: the default size bounds
-// and no delay.
+// and dimensions, and no delay.
 func DefaultOptions() Options {
-	return Options{MaxWidth: DefaultMaxWidth, MaxHeight: DefaultMaxHeight}
+	return Options{
+		MaxWidth:      DefaultMaxWidth,
+		MaxHeight:     DefaultMaxHeight,
+		DefaultWidth:  DefaultWidth,
+		DefaultHeight: DefaultHeight,
+	}
 }
 
 // Default returns the parameter set used when a key carries no segments.
@@ -54,8 +70,8 @@ func Default() Params {
 	return Params{
 		Type:   "image",
 		Format: "svg",
-		Width:  100,
-		Height: 100,
+		Width:  DefaultWidth,
+		Height: DefaultHeight,
 		Colour: color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff},
 	}
 }
@@ -85,12 +101,15 @@ func ParseWithLimits(rawKey string, maxWidth, maxHeight int) (Params, error) {
 }
 
 // ParseWithOptions parses an S3 key string into Params under opts: a `size`
-// segment exceeding opts.MaxWidth/MaxHeight is rejected, and a key with no
-// `delay` segment gets opts.DefaultDelayMin/DefaultDelayMax. An explicit
-// `delay` segment always overrides the configured default. See Parse for the
-// key grammar.
+// segment exceeding opts.MaxWidth/MaxHeight is rejected, a key with no `size`
+// segment gets opts.DefaultWidth/DefaultHeight, and a key with no `delay`
+// segment gets opts.DefaultDelayMin/DefaultDelayMax. An explicit segment
+// always overrides the configured default. See Parse for the key grammar.
 func ParseWithOptions(rawKey string, opts Options) (Params, error) {
 	p := Default()
+	if opts.DefaultWidth > 0 && opts.DefaultHeight > 0 {
+		p.Width, p.Height = opts.DefaultWidth, opts.DefaultHeight
+	}
 	p.DelayMin, p.DelayMax = opts.DefaultDelayMin, opts.DefaultDelayMax
 
 	trimmed := strings.Trim(rawKey, "/")
@@ -188,18 +207,30 @@ func applyFormat(p *Params, v string) error {
 }
 
 func applySize(p *Params, v string, maxWidth, maxHeight int) error {
-	wStr, hStr, ok := strings.Cut(v, "x")
+	w, h, ok := ParseSize(v, maxWidth, maxHeight)
 	if !ok {
-		return invalidParam("size", v)
-	}
-	w, errW := strconv.Atoi(wStr)
-	h, errH := strconv.Atoi(hStr)
-	if errW != nil || errH != nil || w <= 0 || h <= 0 || w > maxWidth || h > maxHeight {
 		return invalidParam("size", v)
 	}
 	p.Width = w
 	p.Height = h
 	return nil
+}
+
+// ParseSize parses the `size` value syntax — `{width}x{height}` in pixels —
+// reporting whether the value is well-formed, positive, and within
+// maxWidth/maxHeight. Callers outside key parsing (e.g. configuration) use it
+// to accept the same syntax.
+func ParseSize(v string, maxWidth, maxHeight int) (width, height int, ok bool) {
+	wStr, hStr, cut := strings.Cut(v, "x")
+	if !cut {
+		return 0, 0, false
+	}
+	w, errW := strconv.Atoi(wStr)
+	h, errH := strconv.Atoi(hStr)
+	if errW != nil || errH != nil || w <= 0 || h <= 0 || w > maxWidth || h > maxHeight {
+		return 0, 0, false
+	}
+	return w, h, true
 }
 
 func applyColour(p *Params, v string) error {

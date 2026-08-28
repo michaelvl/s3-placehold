@@ -30,6 +30,8 @@ func NewHandler(cfg config.Config, synthesizer synth.Synthesizer) *Handler {
 		parseOpts: key.Options{
 			MaxWidth:        cfg.MaxWidth,
 			MaxHeight:       cfg.MaxHeight,
+			DefaultWidth:    cfg.DefaultWidth,
+			DefaultHeight:   cfg.DefaultHeight,
 			DefaultDelayMin: cfg.DefaultDelayMin,
 			DefaultDelayMax: cfg.DefaultDelayMax,
 		},
