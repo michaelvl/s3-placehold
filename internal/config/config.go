@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/michaelvl/s3-placehold/internal/key"
 )
@@ -32,6 +33,8 @@ type Config struct {
 	SecretAccessKey string
 	MaxWidth        int
 	MaxHeight       int
+	DefaultDelayMin time.Duration
+	DefaultDelayMax time.Duration
 }
 
 const (
@@ -79,7 +82,30 @@ func Load() (Config, error) {
 	}
 	cfg.MaxHeight = maxHeight
 
+	delayMin, delayMax, err := parseDefaultDelay()
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.DefaultDelayMin = delayMin
+	cfg.DefaultDelayMax = delayMax
+
 	return cfg, nil
+}
+
+// parseDefaultDelay parses DEFAULT_DELAY_MS, the delay applied to requests
+// whose key carries no `delay` segment. It accepts the same syntax as that
+// segment — a fixed millisecond count or a `min,max` range — and yields no
+// delay when unset.
+func parseDefaultDelay() (lo, hi time.Duration, err error) {
+	raw := os.Getenv("DEFAULT_DELAY_MS")
+	if raw == "" {
+		return 0, 0, nil
+	}
+	lo, hi, ok := key.ParseDelay(strings.Split(raw, ","))
+	if !ok {
+		return 0, 0, fmt.Errorf("invalid DEFAULT_DELAY_MS %q: must be milliseconds (\"200\") or a range (\"100,500\")", raw)
+	}
+	return lo, hi, nil
 }
 
 // parseMaxPixels parses an env var holding a positive pixel-dimension cap,

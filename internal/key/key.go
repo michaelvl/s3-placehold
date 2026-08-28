@@ -27,11 +27,27 @@ type Params struct {
 
 // Default upper bounds on requested image dimensions, used by Parse. Callers
 // that need different bounds (e.g. from configuration) should use
-// ParseWithLimits directly.
+// ParseWithLimits or ParseWithOptions directly.
 const (
 	DefaultMaxWidth  = 10000
 	DefaultMaxHeight = 10000
 )
+
+// Options carries server configuration into key parsing: the size caps a
+// `size` segment is checked against, and the delay applied to keys that carry
+// no `delay` segment.
+type Options struct {
+	MaxWidth        int
+	MaxHeight       int
+	DefaultDelayMin time.Duration
+	DefaultDelayMax time.Duration
+}
+
+// DefaultOptions returns the options used by Parse: the default size bounds
+// and no delay.
+func DefaultOptions() Options {
+	return Options{MaxWidth: DefaultMaxWidth, MaxHeight: DefaultMaxHeight}
+}
 
 // Default returns the parameter set used when a key carries no segments.
 func Default() Params {
@@ -58,14 +74,24 @@ func invalidSegment(seg string) error {
 // with `,`-separated multi-values and percent-decoding applied to names and
 // values.
 func Parse(rawKey string) (Params, error) {
-	return ParseWithLimits(rawKey, DefaultMaxWidth, DefaultMaxHeight)
+	return ParseWithOptions(rawKey, DefaultOptions())
 }
 
 // ParseWithLimits parses an S3 key string into Params, rejecting a `size`
 // segment whose width or height exceeds maxWidth or maxHeight. See Parse for
 // the key grammar.
 func ParseWithLimits(rawKey string, maxWidth, maxHeight int) (Params, error) {
+	return ParseWithOptions(rawKey, Options{MaxWidth: maxWidth, MaxHeight: maxHeight})
+}
+
+// ParseWithOptions parses an S3 key string into Params under opts: a `size`
+// segment exceeding opts.MaxWidth/MaxHeight is rejected, and a key with no
+// `delay` segment gets opts.DefaultDelayMin/DefaultDelayMax. An explicit
+// `delay` segment always overrides the configured default. See Parse for the
+// key grammar.
+func ParseWithOptions(rawKey string, opts Options) (Params, error) {
 	p := Default()
+	p.DelayMin, p.DelayMax = opts.DefaultDelayMin, opts.DefaultDelayMax
 
 	trimmed := strings.Trim(rawKey, "/")
 	if trimmed == "" {
@@ -92,7 +118,7 @@ func ParseWithLimits(rawKey string, maxWidth, maxHeight int) (Params, error) {
 			return Params{}, invalidParam(name, rawValue)
 		}
 
-		if err := applySegment(&p, name, values, maxWidth, maxHeight); err != nil {
+		if err := applySegment(&p, name, values, opts.MaxWidth, opts.MaxHeight); err != nil {
 			return Params{}, err
 		}
 	}
@@ -202,24 +228,35 @@ func parseHexColour(v string) (color.RGBA, bool) {
 }
 
 func applyDelay(p *Params, values []string) error {
+	lo, hi, ok := ParseDelay(values)
+	if !ok {
+		return invalidParam("delay", strings.Join(values, ","))
+	}
+	p.DelayMin, p.DelayMax = lo, hi
+	return nil
+}
+
+// ParseDelay parses the `delay` value syntax — a single non-negative
+// millisecond count, or a `min,max` pair — into an inclusive duration range,
+// reporting whether the values are valid. Callers outside key parsing (e.g.
+// configuration) use it to accept the same syntax.
+func ParseDelay(values []string) (lo, hi time.Duration, ok bool) {
 	switch len(values) {
 	case 1:
 		ms, err := strconv.Atoi(values[0])
 		if err != nil || ms < 0 {
-			return invalidParam("delay", values[0])
+			return 0, 0, false
 		}
 		d := time.Duration(ms) * time.Millisecond
-		p.DelayMin, p.DelayMax = d, d
+		return d, d, true
 	case 2:
 		minMs, errMin := strconv.Atoi(values[0])
 		maxMs, errMax := strconv.Atoi(values[1])
 		if errMin != nil || errMax != nil || minMs < 0 || maxMs < minMs {
-			return invalidParam("delay", strings.Join(values, ","))
+			return 0, 0, false
 		}
-		p.DelayMin = time.Duration(minMs) * time.Millisecond
-		p.DelayMax = time.Duration(maxMs) * time.Millisecond
+		return time.Duration(minMs) * time.Millisecond, time.Duration(maxMs) * time.Millisecond, true
 	default:
-		return invalidParam("delay", strings.Join(values, ","))
+		return 0, 0, false
 	}
-	return nil
 }

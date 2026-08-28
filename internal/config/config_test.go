@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"github.com/michaelvl/s3-placehold/internal/key"
 )
@@ -13,6 +14,7 @@ func TestLoadZeroConfigDefault(t *testing.T) {
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
 	t.Setenv("MAX_X_PIXELS", "")
 	t.Setenv("MAX_Y_PIXELS", "")
+	t.Setenv("DEFAULT_DELAY_MS", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -36,6 +38,9 @@ func TestLoadZeroConfigDefault(t *testing.T) {
 	}
 	if cfg.MaxHeight != key.DefaultMaxHeight {
 		t.Errorf("MaxHeight = %d, want %d", cfg.MaxHeight, key.DefaultMaxHeight)
+	}
+	if cfg.DefaultDelayMin != 0 || cfg.DefaultDelayMax != 0 {
+		t.Errorf("DefaultDelayMin/Max = %v/%v, want 0/0", cfg.DefaultDelayMin, cfg.DefaultDelayMax)
 	}
 }
 
@@ -127,5 +132,40 @@ func TestLookup(t *testing.T) {
 
 	if _, ok := cfg.Lookup("missing"); ok {
 		t.Errorf("Lookup(%q) ok = true, want false", "missing")
+	}
+}
+
+func TestLoadDefaultDelayFixed(t *testing.T) {
+	t.Setenv("DEFAULT_DELAY_MS", "200")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.DefaultDelayMin != 200*time.Millisecond || cfg.DefaultDelayMax != 200*time.Millisecond {
+		t.Errorf("DefaultDelayMin/Max = %v/%v, want 200ms/200ms", cfg.DefaultDelayMin, cfg.DefaultDelayMax)
+	}
+}
+
+func TestLoadDefaultDelayRange(t *testing.T) {
+	t.Setenv("DEFAULT_DELAY_MS", "100,500")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	if cfg.DefaultDelayMin != 100*time.Millisecond || cfg.DefaultDelayMax != 500*time.Millisecond {
+		t.Errorf("DefaultDelayMin/Max = %v/%v, want 100ms/500ms", cfg.DefaultDelayMin, cfg.DefaultDelayMax)
+	}
+}
+
+func TestLoadInvalidDefaultDelay(t *testing.T) {
+	for _, v := range []string{"abc", "-1", "500,100", "1,2,3", "100,"} {
+		t.Setenv("DEFAULT_DELAY_MS", v)
+		if _, err := Load(); err == nil {
+			t.Errorf("Load(DEFAULT_DELAY_MS=%s) = nil error, want error", v)
+		}
 	}
 }

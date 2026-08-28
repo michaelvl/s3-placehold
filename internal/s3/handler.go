@@ -17,13 +17,23 @@ import (
 
 // Handler serves the S3-compatible HTTP API.
 type Handler struct {
-	cfg   config.Config
-	synth synth.Synthesizer
+	cfg       config.Config
+	synth     synth.Synthesizer
+	parseOpts key.Options
 }
 
 // NewHandler constructs a Handler.
 func NewHandler(cfg config.Config, synthesizer synth.Synthesizer) *Handler {
-	return &Handler{cfg: cfg, synth: synthesizer}
+	return &Handler{
+		cfg:   cfg,
+		synth: synthesizer,
+		parseOpts: key.Options{
+			MaxWidth:        cfg.MaxWidth,
+			MaxHeight:       cfg.MaxHeight,
+			DefaultDelayMin: cfg.DefaultDelayMin,
+			DefaultDelayMax: cfg.DefaultDelayMax,
+		},
+	}
 }
 
 // ServeHTTP implements http.Handler.
@@ -106,7 +116,7 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request, presigned bo
 // respondObject synthesizes objectKey and writes the response headers,
 // including the body only when includeBody is set (GetObject vs HeadObject).
 func (h *Handler) respondObject(w http.ResponseWriter, objectKey string, includeBody bool) {
-	params, err := key.ParseWithLimits(objectKey, h.cfg.MaxWidth, h.cfg.MaxHeight)
+	params, err := key.ParseWithOptions(objectKey, h.parseOpts)
 	if err != nil {
 		writeInvalidArgument(w, err)
 		return

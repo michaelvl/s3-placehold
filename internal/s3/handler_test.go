@@ -457,3 +457,29 @@ func TestUnconfiguredBucketReturnsNoSuchBucket(t *testing.T) {
 		})
 	}
 }
+
+func TestGetObjectDefaultDelayFromConfig(t *testing.T) {
+	cfg := config.Config{
+		Port:            9000,
+		Buckets:         []config.BucketConfig{{Name: "placeholder", Mode: config.ModePublic}},
+		MaxWidth:        key.DefaultMaxWidth,
+		MaxHeight:       key.DefaultMaxHeight,
+		DefaultDelayMin: 50 * time.Millisecond,
+		DefaultDelayMax: 50 * time.Millisecond,
+	}
+	h := NewHandler(cfg, synth.NewRouter(image.New()))
+	req := httptest.NewRequest(http.MethodGet, "/placeholder/format=png", nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+
+	start := time.Now()
+	h.ServeHTTP(rec, req)
+	elapsed := time.Since(start)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if elapsed < 50*time.Millisecond {
+		t.Errorf("elapsed = %v, want >= 50ms", elapsed)
+	}
+}

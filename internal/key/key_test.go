@@ -246,3 +246,55 @@ func TestParsePercentEncodedCommaInText(t *testing.T) {
 		t.Errorf("Text = %q, want %q", got.Text, "a,b")
 	}
 }
+
+func TestParseWithOptionsDefaultDelayApplied(t *testing.T) {
+	opts := Options{MaxWidth: DefaultMaxWidth, MaxHeight: DefaultMaxHeight, DefaultDelayMin: 100 * time.Millisecond, DefaultDelayMax: 500 * time.Millisecond}
+
+	got, err := ParseWithOptions("/format=png", opts)
+	if err != nil {
+		t.Fatalf("ParseWithOptions returned error: %v", err)
+	}
+	if got.DelayMin != 100*time.Millisecond || got.DelayMax != 500*time.Millisecond {
+		t.Errorf("DelayMin/DelayMax = %v/%v, want 100ms/500ms", got.DelayMin, got.DelayMax)
+	}
+}
+
+func TestParseWithOptionsDelaySegmentOverridesDefault(t *testing.T) {
+	opts := Options{MaxWidth: DefaultMaxWidth, MaxHeight: DefaultMaxHeight, DefaultDelayMin: 100 * time.Millisecond, DefaultDelayMax: 500 * time.Millisecond}
+
+	got, err := ParseWithOptions("/delay=50", opts)
+	if err != nil {
+		t.Fatalf("ParseWithOptions returned error: %v", err)
+	}
+	if got.DelayMin != 50*time.Millisecond || got.DelayMax != 50*time.Millisecond {
+		t.Errorf("DelayMin/DelayMax = %v/%v, want 50ms/50ms", got.DelayMin, got.DelayMax)
+	}
+}
+
+func TestParseWithOptionsZeroDelaySegmentDisablesDefault(t *testing.T) {
+	opts := Options{MaxWidth: DefaultMaxWidth, MaxHeight: DefaultMaxHeight, DefaultDelayMin: 100 * time.Millisecond, DefaultDelayMax: 500 * time.Millisecond}
+
+	got, err := ParseWithOptions("/delay=0", opts)
+	if err != nil {
+		t.Fatalf("ParseWithOptions returned error: %v", err)
+	}
+	if got.DelayMin != 0 || got.DelayMax != 0 {
+		t.Errorf("DelayMin/DelayMax = %v/%v, want 0/0", got.DelayMin, got.DelayMax)
+	}
+}
+
+func TestParseDelayValues(t *testing.T) {
+	lo, hi, ok := ParseDelay([]string{"200"})
+	if !ok || lo != 200*time.Millisecond || hi != 200*time.Millisecond {
+		t.Errorf("ParseDelay([200]) = %v/%v/%v, want 200ms/200ms/true", lo, hi, ok)
+	}
+	lo, hi, ok = ParseDelay([]string{"100", "500"})
+	if !ok || lo != 100*time.Millisecond || hi != 500*time.Millisecond {
+		t.Errorf("ParseDelay([100 500]) = %v/%v/%v, want 100ms/500ms/true", lo, hi, ok)
+	}
+	for _, values := range [][]string{{"abc"}, {"-1"}, {"500", "100"}, {"1", "2", "3"}, {}} {
+		if _, _, ok := ParseDelay(values); ok {
+			t.Errorf("ParseDelay(%v) = true, want false", values)
+		}
+	}
+}
