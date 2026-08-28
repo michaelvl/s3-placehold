@@ -32,6 +32,7 @@ func NewHandler(cfg config.Config, synthesizer synth.Synthesizer) *Handler {
 			MaxHeight:       cfg.MaxHeight,
 			DefaultWidth:    cfg.DefaultWidth,
 			DefaultHeight:   cfg.DefaultHeight,
+			DefaultColour:   cfg.DefaultColour,
 			DefaultDelayMin: cfg.DefaultDelayMin,
 			DefaultDelayMax: cfg.DefaultDelayMax,
 		},

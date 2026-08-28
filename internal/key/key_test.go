@@ -352,3 +352,55 @@ func TestParseSizeValues(t *testing.T) {
 		t.Errorf("ParseSize(over max height) = true, want false")
 	}
 }
+
+func TestParseWithOptionsDefaultColourApplied(t *testing.T) {
+	opts := DefaultOptions()
+	opts.DefaultColour = color.RGBA{R: 0x11, G: 0x22, B: 0x33, A: 0xff}
+
+	got, err := ParseWithOptions("/format=png", opts)
+	if err != nil {
+		t.Fatalf("ParseWithOptions returned error: %v", err)
+	}
+	if got.Colour != opts.DefaultColour {
+		t.Errorf("Colour = %+v, want %+v", got.Colour, opts.DefaultColour)
+	}
+}
+
+func TestParseWithOptionsColourSegmentOverridesDefault(t *testing.T) {
+	opts := DefaultOptions()
+	opts.DefaultColour = color.RGBA{R: 0x11, G: 0x22, B: 0x33, A: 0xff}
+
+	got, err := ParseWithOptions("/colour=ff0000", opts)
+	if err != nil {
+		t.Fatalf("ParseWithOptions returned error: %v", err)
+	}
+	want := color.RGBA{R: 0xff, A: 0xff}
+	if got.Colour != want {
+		t.Errorf("Colour = %+v, want %+v", got.Colour, want)
+	}
+}
+
+func TestParseWithOptionsZeroDefaultColourFallsBack(t *testing.T) {
+	got, err := ParseWithOptions("/format=png", Options{MaxWidth: DefaultMaxWidth, MaxHeight: DefaultMaxHeight})
+	if err != nil {
+		t.Fatalf("ParseWithOptions returned error: %v", err)
+	}
+	if got.Colour != DefaultColour() {
+		t.Errorf("Colour = %+v, want %+v", got.Colour, DefaultColour())
+	}
+}
+
+func TestParseColourValues(t *testing.T) {
+	c, ok := ParseColour("ff0000")
+	if !ok || c != (color.RGBA{R: 0xff, A: 0xff}) {
+		t.Errorf("ParseColour(ff0000) = %+v/%v, want red/true", c, ok)
+	}
+	if _, ok := ParseColour("lightblue"); !ok {
+		t.Errorf("ParseColour(lightblue) = false, want true")
+	}
+	for _, v := range []string{"FF0000", "#ff0000", "ff00", "notacolour", ""} {
+		if _, ok := ParseColour(v); ok {
+			t.Errorf("ParseColour(%q) = true, want false", v)
+		}
+	}
+}

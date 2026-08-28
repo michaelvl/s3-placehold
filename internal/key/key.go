@@ -40,28 +40,37 @@ const (
 	DefaultHeight = 100
 )
 
+// DefaultColour returns the background fill used when neither the key nor the
+// server configuration specifies a colour.
+func DefaultColour() color.RGBA {
+	return color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
+}
+
 // Options carries server configuration into key parsing: the size caps a
-// `size` segment is checked against, and the size and delay applied to keys
-// that carry no `size` / `delay` segment. A zero DefaultWidth or
-// DefaultHeight means the built-in DefaultWidth/DefaultHeight; a zero delay
+// `size` segment is checked against, and the size, colour and delay applied
+// to keys that carry no `size` / `colour` / `delay` segment. A zero
+// DefaultWidth or DefaultHeight means the built-in DefaultWidth/DefaultHeight,
+// a fully transparent DefaultColour means DefaultColour(), and a zero delay
 // means no delay.
 type Options struct {
 	MaxWidth        int
 	MaxHeight       int
 	DefaultWidth    int
 	DefaultHeight   int
+	DefaultColour   color.RGBA
 	DefaultDelayMin time.Duration
 	DefaultDelayMax time.Duration
 }
 
-// DefaultOptions returns the options used by Parse: the default size bounds
-// and dimensions, and no delay.
+// DefaultOptions returns the options used by Parse: the default size bounds,
+// dimensions and colour, and no delay.
 func DefaultOptions() Options {
 	return Options{
 		MaxWidth:      DefaultMaxWidth,
 		MaxHeight:     DefaultMaxHeight,
 		DefaultWidth:  DefaultWidth,
 		DefaultHeight: DefaultHeight,
+		DefaultColour: DefaultColour(),
 	}
 }
 
@@ -72,7 +81,7 @@ func Default() Params {
 		Format: "svg",
 		Width:  DefaultWidth,
 		Height: DefaultHeight,
-		Colour: color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff},
+		Colour: DefaultColour(),
 	}
 }
 
@@ -101,14 +110,17 @@ func ParseWithLimits(rawKey string, maxWidth, maxHeight int) (Params, error) {
 }
 
 // ParseWithOptions parses an S3 key string into Params under opts: a `size`
-// segment exceeding opts.MaxWidth/MaxHeight is rejected, a key with no `size`
-// segment gets opts.DefaultWidth/DefaultHeight, and a key with no `delay`
-// segment gets opts.DefaultDelayMin/DefaultDelayMax. An explicit segment
-// always overrides the configured default. See Parse for the key grammar.
+// segment exceeding opts.MaxWidth/MaxHeight is rejected, and a key with no
+// `size`, `colour` or `delay` segment gets the corresponding configured
+// default. An explicit segment always overrides the configured default. See
+// Parse for the key grammar.
 func ParseWithOptions(rawKey string, opts Options) (Params, error) {
 	p := Default()
 	if opts.DefaultWidth > 0 && opts.DefaultHeight > 0 {
 		p.Width, p.Height = opts.DefaultWidth, opts.DefaultHeight
+	}
+	if opts.DefaultColour.A != 0 {
+		p.Colour = opts.DefaultColour
 	}
 	p.DelayMin, p.DelayMax = opts.DefaultDelayMin, opts.DefaultDelayMax
 
@@ -234,15 +246,26 @@ func ParseSize(v string, maxWidth, maxHeight int) (width, height int, ok bool) {
 }
 
 func applyColour(p *Params, v string) error {
+	c, ok := ParseColour(v)
+	if !ok {
+		return invalidParam("colour", v)
+	}
+	p.Colour = c
+	return nil
+}
+
+// ParseColour parses the `colour` value syntax — a lowercase 6-digit hex
+// value without a leading '#', or a CSS named colour — reporting whether the
+// value is recognised. Callers outside key parsing (e.g. configuration) use
+// it to accept the same syntax.
+func ParseColour(v string) (color.RGBA, bool) {
 	if c, ok := parseHexColour(v); ok {
-		p.Colour = c
-		return nil
+		return c, true
 	}
 	if c, ok := colornames.Map[strings.ToLower(v)]; ok {
-		p.Colour = c
-		return nil
+		return c, true
 	}
-	return invalidParam("colour", v)
+	return color.RGBA{}, false
 }
 
 // parseHexColour parses a lowercase 6-digit hex colour without a leading

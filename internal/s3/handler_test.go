@@ -3,6 +3,7 @@ package s3
 import (
 	"bytes"
 	"encoding/xml"
+	"image/color"
 	"image/jpeg"
 	"image/png"
 	"net/http"
@@ -509,5 +510,33 @@ func TestGetObjectDefaultSizeFromConfig(t *testing.T) {
 	}
 	if img.Bounds().Dx() != 800 || img.Bounds().Dy() != 600 {
 		t.Errorf("dimensions = %dx%d, want 800x600", img.Bounds().Dx(), img.Bounds().Dy())
+	}
+}
+
+func TestGetObjectDefaultColourFromConfig(t *testing.T) {
+	cfg := config.Config{
+		Port:          9000,
+		Buckets:       []config.BucketConfig{{Name: "placeholder", Mode: config.ModePublic}},
+		MaxWidth:      key.DefaultMaxWidth,
+		MaxHeight:     key.DefaultMaxHeight,
+		DefaultColour: color.RGBA{R: 0xff, A: 0xff},
+	}
+	h := NewHandler(cfg, synth.NewRouter(image.New()))
+	req := httptest.NewRequest(http.MethodGet, "/placeholder/format=png", nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	img, err := png.Decode(bytes.NewReader(rec.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("failed to decode PNG: %v", err)
+	}
+	r, g, b, _ := img.At(0, 0).RGBA()
+	if r>>8 != 0xff || g>>8 != 0 || b>>8 != 0 {
+		t.Errorf("corner pixel = (%d,%d,%d), want (255,0,0)", r>>8, g>>8, b>>8)
 	}
 }

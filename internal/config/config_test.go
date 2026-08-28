@@ -1,6 +1,7 @@
 package config
 
 import (
+	"image/color"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ func TestLoadZeroConfigDefault(t *testing.T) {
 	t.Setenv("MAX_Y_PIXELS", "")
 	t.Setenv("DEFAULT_DELAY_MS", "")
 	t.Setenv("DEFAULT_SIZE", "")
+	t.Setenv("DEFAULT_COLOUR", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -45,6 +47,9 @@ func TestLoadZeroConfigDefault(t *testing.T) {
 	}
 	if cfg.DefaultWidth != key.DefaultWidth || cfg.DefaultHeight != key.DefaultHeight {
 		t.Errorf("DefaultWidth/Height = %dx%d, want %dx%d", cfg.DefaultWidth, cfg.DefaultHeight, key.DefaultWidth, key.DefaultHeight)
+	}
+	if cfg.DefaultColour != key.DefaultColour() {
+		t.Errorf("DefaultColour = %+v, want %+v", cfg.DefaultColour, key.DefaultColour())
 	}
 }
 
@@ -203,5 +208,42 @@ func TestLoadDefaultSizeOverMaxPixels(t *testing.T) {
 
 	if _, err := Load(); err == nil {
 		t.Errorf("Load(DEFAULT_SIZE over MAX_X_PIXELS) = nil error, want error")
+	}
+}
+
+func TestLoadDefaultColour(t *testing.T) {
+	t.Setenv("DEFAULT_COLOUR", "ff0000")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	want := color.RGBA{R: 0xff, A: 0xff}
+	if cfg.DefaultColour != want {
+		t.Errorf("DefaultColour = %+v, want %+v", cfg.DefaultColour, want)
+	}
+}
+
+func TestLoadDefaultColourNamed(t *testing.T) {
+	t.Setenv("DEFAULT_COLOUR", "lightblue")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	want := color.RGBA{R: 0xad, G: 0xd8, B: 0xe6, A: 0xff} // CSS lightblue
+	if cfg.DefaultColour != want {
+		t.Errorf("DefaultColour = %+v, want %+v", cfg.DefaultColour, want)
+	}
+}
+
+func TestLoadInvalidDefaultColour(t *testing.T) {
+	for _, v := range []string{"FF0000", "#ff0000", "notacolour", "ff00"} {
+		t.Setenv("DEFAULT_COLOUR", v)
+		if _, err := Load(); err == nil {
+			t.Errorf("Load(DEFAULT_COLOUR=%s) = nil error, want error", v)
+		}
 	}
 }

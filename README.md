@@ -103,7 +103,7 @@ order, all optional:
 | `type`   | `image`                                                                  | `image`   | Routes to a synthesis pipeline. Only `image` exists today; unknown values → 400. |
 | `format` | `svg` \| `png` \| `jpeg`                                                 | `svg`     | Output format and `Content-Type`. Other values → 400.                            |
 | `size`   | `{width}x{height}`, e.g. `200x300`                                       | `DEFAULT_SIZE` (`100x100`) | Pixels. Non-integer or non-positive → 400.                            |
-| `colour` | Lowercase hex without `#` (`ff0000`) or a CSS named colour (`lightblue`) | `cccccc`  | Background fill. Unrecognised value → 400.                                       |
+| `colour` | Lowercase hex without `#` (`ff0000`) or a CSS named colour (`lightblue`) | `DEFAULT_COLOUR` (`cccccc`) | Background fill. Unrecognised value → 400.                     |
 | `text`   | URL-encoded string, `+` = space                                          | _(none)_  | Overlaid on the image; colour auto-contrasts against the background.             |
 | `delay`  | Fixed ms (`200`) or an inclusive random range (`100,500`)                | `DEFAULT_DELAY_MS` | Server sleeps before responding, to simulate slow storage. Defaults to no delay unless `DEFAULT_DELAY_MS` is set; an explicit `delay` (including `delay=0`) overrides it. |
 
@@ -120,6 +120,7 @@ All configuration is via environment variables:
 | `MAX_X_PIXELS`          | Maximum allowed `size` width, in pixels                | `10000`              |
 | `MAX_Y_PIXELS`          | Maximum allowed `size` height, in pixels               | `10000`              |
 | `DEFAULT_SIZE`          | Size for keys with no `size` segment, as `{width}x{height}` | `100x100`       |
+| `DEFAULT_COLOUR`        | Background fill for keys with no `colour` segment: hex or CSS colour name | `cccccc` |
 | `DEFAULT_DELAY_MS`      | Delay for keys with no `delay` segment: fixed ms (`200`) or a range (`100,500`) | `0` (no delay) |
 
 ## Key limitations vs. real AWS S3
