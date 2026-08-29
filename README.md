@@ -105,7 +105,7 @@ order, all optional:
 | `format` | `svg` \| `png` \| `jpeg`                                                 | `svg`     | Output format and `Content-Type`. Other values → 400.                            |
 | `size`   | `{width}x{height}`, e.g. `200x300`                                       | `DEFAULT_SIZE` (`100x100`) | Pixels. Non-integer or non-positive → 400.                            |
 | `colour` | Up to 8 comma-separated values, each lowercase hex without `#` (`ff0000`) or a CSS named colour (`lightblue`) | `DEFAULT_COLOUR` (`cccccc`) | Background fill. Two or more colours are painted as a gradient. Unrecognised value, or more than 8 → 400. |
-| `gradient` | `linear` with an optional angle (`linear:45`) \| `radial` \| `mesh` \| `none` | `DEFAULT_GRADIENT`, else `linear:90` for multi-colour keys and `none` otherwise | Geometry the `colour` list is painted with. One colour always paints flat, whatever this says. Other values → 400. |
+| `gradient` | `linear` with an optional angle (`linear:45`) \| `radial` \| `mesh` \| `none` | `DEFAULT_GRADIENT`, else `linear:90` for multi-colour keys and `none` otherwise | Geometry the `colour` list is painted with. Needs two or more colours — anything but `none` with a single colour → 400. Other values → 400. |
 | `text`   | URL-encoded string, `+` = space                                          | _(none)_  | Overlaid on the image; colour auto-contrasts against the background.             |
 | `delay`  | Fixed ms (`200`) or an inclusive random range (`100,500`)                | `DEFAULT_DELAY_MS` | Server sleeps before responding, to simulate slow storage. Defaults to no delay unless `DEFAULT_DELAY_MS` is set; an explicit `delay` (including `delay=0`) overrides it. |
 
@@ -130,6 +130,16 @@ Geometry is chosen by the first of these that applies: an explicit `gradient`
 segment, then `DEFAULT_GRADIENT`, then `linear:90` if the key has more than one
 colour, then a flat fill. So `DEFAULT_GRADIENT=none` makes a multi-colour key
 paint flat unless it names a `gradient` of its own.
+
+A gradient needs at least two colours to interpolate between, and the two ways
+of asking for one are treated differently:
+
+- A key naming a `gradient` with a single colour is **rejected with a 400** —
+  `/colour=lightblue/gradient=radial` is a mistake worth reporting, not a
+  request for a flat fill. Add a second colour (`colour=lightblue,steelblue`),
+  or ask for `gradient=none`.
+- A key with a single colour under a configured `DEFAULT_GRADIENT` simply
+  paints flat. That key requested no gradient, so there is nothing to report.
 
 All three formats render the same picture: `format` selects the encoding, not
 the image. SVG output stays a few hundred bytes whatever the requested `size`,

@@ -146,6 +146,10 @@ func invalidSegment(seg string) error {
 	return fmt.Errorf("Invalid key segment (missing '='): '%s'", seg) //nolint:staticcheck // ST1005: wording fixed by API contract, see README
 }
 
+func gradientNeedsColours(kind GradientKind) error {
+	return fmt.Errorf("Parameter 'gradient' value '%s' requires at least two 'colour' values", kind) //nolint:staticcheck // ST1005: wording fixed by API contract, see README
+}
+
 // Parse parses an S3 key string into Params using the default size bounds
 // (DefaultMaxWidth, DefaultMaxHeight). A key with no segments yields
 // Default(). Segments are `/`-separated `name=value` pairs, in any order,
@@ -211,23 +215,36 @@ func ParseWithOptions(rawKey string, opts Options) (Params, error) {
 		}
 	}
 
+	// A gradient needs two stops to interpolate between. A key that asked for
+	// one explicitly is told so rather than being handed a flat fill it did
+	// not ask for; a configured default degrades quietly, below, because such
+	// a key requested no gradient at all.
+	if p.Gradient.IsSet() && p.Gradient.Kind != GradientNone && len(p.Colours) < 2 {
+		return Params{}, gradientNeedsColours(p.Gradient.Kind)
+	}
+
 	p.Gradient = resolveGradient(p.Gradient, opts.DefaultGradient, len(p.Colours))
 	return p, nil
 }
 
 // resolveGradient picks the background geometry: an explicit `gradient`
 // segment wins, then the configured default, then a default-angle linear
-// gradient for multi-colour keys, then a flat fill.
+// gradient. A single colour always resolves to a flat fill, so the resolved
+// geometry is never one the renderer would have to discard.
 func resolveGradient(seen, configured Gradient, nColours int) Gradient {
+	// One colour has nothing to interpolate towards. A key that asked for a
+	// gradient explicitly has already been rejected, so this only flattens a
+	// configured default, which requested nothing of this key.
+	if nColours < 2 {
+		return Gradient{Kind: GradientNone}
+	}
 	switch {
 	case seen.IsSet():
 		return seen
 	case configured.IsSet():
 		return configured
-	case nColours > 1:
-		return Gradient{Kind: GradientLinear, Angle: DefaultGradientAngle}
 	default:
-		return Gradient{Kind: GradientNone}
+		return Gradient{Kind: GradientLinear, Angle: DefaultGradientAngle}
 	}
 }
 

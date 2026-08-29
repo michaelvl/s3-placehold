@@ -493,7 +493,8 @@ func TestResolveGradient(t *testing.T) {
 		want       Gradient
 	}{
 		{"segment wins over everything", explicit, configured, 3, explicit},
-		{"configured wins over the colour count", Gradient{}, configured, 3, configured},
+		{"configured wins over the auto fallback", Gradient{}, configured, 3, configured},
+		{"single colour flattens a configured default", Gradient{}, configured, 1, flat},
 		{"multi-colour falls back to linear", Gradient{}, Gradient{}, 3, autoLinear},
 		{"single colour falls back to flat", Gradient{}, Gradient{}, 1, flat},
 		{"explicit none beats the colour count", flat, configured, 3, flat},
@@ -536,7 +537,7 @@ func TestParseWithOptionsDefaultGradient(t *testing.T) {
 		"/colour=ff0000,0000ff":               {Kind: GradientRadial}, // configured default applies
 		"/colour=ff0000,0000ff/gradient=mesh": {Kind: GradientMesh},   // segment overrides it
 		"/colour=ff0000,0000ff/gradient=none": {Kind: GradientNone},   // explicit none overrides it too
-		"/colour=ff0000":                      {Kind: GradientRadial}, // applied regardless of colour count
+		"/colour=ff0000":                      {Kind: GradientNone},   // one colour flattens a configured default
 	}
 	for raw, want := range cases {
 		got, err := ParseWithOptions(raw, opts)
@@ -599,5 +600,45 @@ func TestParseColoursValues(t *testing.T) {
 	}
 	if _, ok := ParseColours(nil); ok {
 		t.Error("ParseColours(nil) = ok, want not ok")
+	}
+}
+
+func TestParseExplicitGradientNeedsTwoColours(t *testing.T) {
+	// A key that names a geometry with nothing to interpolate between is told
+	// so, rather than being handed a flat fill it did not ask for.
+	for _, raw := range []string{
+		"/colour=lightblue/gradient=radial",
+		"/colour=ff0000/gradient=linear:45",
+		"/gradient=mesh", // falls back to the single default colour
+	} {
+		if _, err := Parse(raw); err == nil {
+			t.Errorf("Parse(%q) = nil error, want error", raw)
+		}
+	}
+}
+
+func TestParseExplicitGradientNoneAllowsOneColour(t *testing.T) {
+	// `none` asks for a flat fill, so one colour is exactly right.
+	got, err := Parse("/colour=lightblue/gradient=none")
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	if got.Gradient != (Gradient{Kind: GradientNone}) {
+		t.Errorf("Gradient = %+v, want none", got.Gradient)
+	}
+}
+
+func TestParseConfiguredGradientDegradesQuietly(t *testing.T) {
+	// A configured default requested nothing of this key, so a single-colour
+	// key flattens instead of failing.
+	opts := DefaultOptions()
+	opts.DefaultGradient = Gradient{Kind: GradientRadial}
+
+	got, err := ParseWithOptions("/colour=lightblue", opts)
+	if err != nil {
+		t.Fatalf("ParseWithOptions returned error: %v", err)
+	}
+	if got.Gradient != (Gradient{Kind: GradientNone}) {
+		t.Errorf("Gradient = %+v, want none", got.Gradient)
 	}
 }
