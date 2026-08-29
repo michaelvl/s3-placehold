@@ -13,16 +13,50 @@ import (
 	"golang.org/x/image/colornames"
 )
 
+// GradientKind is the geometry a multi-colour background is painted with. The
+// zero value means "not specified"; every valid `gradient` value maps to a
+// non-empty kind, including GradientNone. Parsing relies on that to tell an
+// explicit `gradient` segment apart from an absent one.
+type GradientKind string
+
+// The gradient geometries a `gradient` segment can select.
+const (
+	GradientNone   GradientKind = "none"
+	GradientLinear GradientKind = "linear"
+	GradientRadial GradientKind = "radial"
+	GradientMesh   GradientKind = "mesh"
+)
+
+// Gradient is the background fill geometry. Angle applies only to
+// GradientLinear: degrees clockwise from "towards the top", following the CSS
+// linear-gradient convention, normalised to [0,360).
+type Gradient struct {
+	Kind  GradientKind
+	Angle int
+}
+
+// IsSet reports whether the gradient geometry has been specified.
+func (g Gradient) IsSet() bool { return g.Kind != "" }
+
 // Params holds the parsed and validated parameters for a synthesis request.
 type Params struct {
 	Type     string
 	Format   string
 	Width    int
 	Height   int
-	Colour   color.RGBA
+	Colours  []color.RGBA // at least one; Colours[0] is the base colour
+	Gradient Gradient
 	Text     string
 	DelayMin time.Duration
 	DelayMax time.Duration
+}
+
+// BaseColour returns the flat fill, which is also the gradient's first stop.
+func (p Params) BaseColour() color.RGBA {
+	if len(p.Colours) == 0 {
+		return DefaultColour()
+	}
+	return p.Colours[0]
 }
 
 // Default upper bounds on requested image dimensions, used by Parse. Callers
@@ -40,57 +74,76 @@ const (
 	DefaultHeight = 100
 )
 
+// MaxColours bounds the length of a `colour` list. It keeps generated SVG
+// small and bounds the per-pixel work in the raster renderer, both of which
+// grow linearly with the number of colours.
+const MaxColours = 8
+
+// DefaultGradientAngle is the linear gradient angle used when `gradient=linear`
+// carries no angle, and by the multi-colour fallback geometry. 90 degrees is
+// left-to-right.
+const DefaultGradientAngle = 90
+
 // DefaultColour returns the background fill used when neither the key nor the
 // server configuration specifies a colour.
 func DefaultColour() color.RGBA {
 	return color.RGBA{R: 0xcc, G: 0xcc, B: 0xcc, A: 0xff}
 }
 
+// DefaultColours returns DefaultColour as a one-element list, the shape
+// Params.Colours takes when no colour is specified.
+func DefaultColours() []color.RGBA {
+	return []color.RGBA{DefaultColour()}
+}
+
 // Options carries server configuration into key parsing: the size caps a
-// `size` segment is checked against, and the size, colour and delay applied
-// to keys that carry no `size` / `colour` / `delay` segment. A zero
-// DefaultWidth or DefaultHeight means the built-in DefaultWidth/DefaultHeight,
-// a fully transparent DefaultColour means DefaultColour(), and a zero delay
-// means no delay.
+// `size` segment is checked against, and the size, colours, gradient and delay
+// applied to keys that carry no `size` / `colour` / `gradient` / `delay`
+// segment. A zero DefaultWidth or DefaultHeight means the built-in
+// DefaultWidth/DefaultHeight, an empty DefaultColours means DefaultColours(),
+// an unset DefaultGradient means the geometry is chosen from the number of
+// colours, and a zero delay means no delay.
 type Options struct {
 	MaxWidth        int
 	MaxHeight       int
 	DefaultWidth    int
 	DefaultHeight   int
-	DefaultColour   color.RGBA
+	DefaultColours  []color.RGBA
+	DefaultGradient Gradient
 	DefaultDelayMin time.Duration
 	DefaultDelayMax time.Duration
 }
 
 // DefaultOptions returns the options used by Parse: the default size bounds,
-// dimensions and colour, and no delay.
+// dimensions and colours, no configured gradient, and no delay.
 func DefaultOptions() Options {
 	return Options{
-		MaxWidth:      DefaultMaxWidth,
-		MaxHeight:     DefaultMaxHeight,
-		DefaultWidth:  DefaultWidth,
-		DefaultHeight: DefaultHeight,
-		DefaultColour: DefaultColour(),
+		MaxWidth:       DefaultMaxWidth,
+		MaxHeight:      DefaultMaxHeight,
+		DefaultWidth:   DefaultWidth,
+		DefaultHeight:  DefaultHeight,
+		DefaultColours: DefaultColours(),
 	}
 }
 
 // Default returns the parameter set used when a key carries no segments.
 func Default() Params {
 	return Params{
-		Type:   "image",
-		Format: "svg",
-		Width:  DefaultWidth,
-		Height: DefaultHeight,
-		Colour: DefaultColour(),
+		Type:     "image",
+		Format:   "svg",
+		Width:    DefaultWidth,
+		Height:   DefaultHeight,
+		Colours:  DefaultColours(),
+		Gradient: Gradient{Kind: GradientNone},
 	}
 }
 
 func invalidParam(name, value string) error {
-	return fmt.Errorf("Invalid value for parameter '%s': '%s'", name, value) //nolint:staticcheck // ST1005: wording fixed by API contract, see docs/spec.md
+	return fmt.Errorf("Invalid value for parameter '%s': '%s'", name, value) //nolint:staticcheck // ST1005: wording fixed by API contract, see README
 }
 
 func invalidSegment(seg string) error {
-	return fmt.Errorf("Invalid key segment (missing '='): '%s'", seg) //nolint:staticcheck // ST1005: wording fixed by API contract, see docs/spec.md
+	return fmt.Errorf("Invalid key segment (missing '='): '%s'", seg) //nolint:staticcheck // ST1005: wording fixed by API contract, see README
 }
 
 // Parse parses an S3 key string into Params using the default size bounds
@@ -111,50 +164,71 @@ func ParseWithLimits(rawKey string, maxWidth, maxHeight int) (Params, error) {
 
 // ParseWithOptions parses an S3 key string into Params under opts: a `size`
 // segment exceeding opts.MaxWidth/MaxHeight is rejected, and a key with no
-// `size`, `colour` or `delay` segment gets the corresponding configured
-// default. An explicit segment always overrides the configured default. See
-// Parse for the key grammar.
+// `size`, `colour`, `gradient` or `delay` segment gets the corresponding
+// configured default. An explicit segment always overrides the configured
+// default. See Parse for the key grammar.
 func ParseWithOptions(rawKey string, opts Options) (Params, error) {
 	p := Default()
+	// Cleared so resolveGradient below can tell an explicit `gradient` segment
+	// apart from the built-in default: every valid segment value yields a
+	// non-empty Kind, including `gradient=none`.
+	p.Gradient = Gradient{}
+
 	if opts.DefaultWidth > 0 && opts.DefaultHeight > 0 {
 		p.Width, p.Height = opts.DefaultWidth, opts.DefaultHeight
 	}
-	if opts.DefaultColour.A != 0 {
-		p.Colour = opts.DefaultColour
+	if len(opts.DefaultColours) > 0 {
+		// Copied: opts is built once per server and shared across concurrent
+		// requests, so the backing array must not escape into Params.
+		p.Colours = append([]color.RGBA(nil), opts.DefaultColours...)
 	}
 	p.DelayMin, p.DelayMax = opts.DefaultDelayMin, opts.DefaultDelayMax
 
-	trimmed := strings.Trim(rawKey, "/")
-	if trimmed == "" {
-		return p, nil
-	}
+	if trimmed := strings.Trim(rawKey, "/"); trimmed != "" {
+		for _, seg := range strings.Split(trimmed, "/") {
+			if seg == "" {
+				continue
+			}
 
-	for _, seg := range strings.Split(trimmed, "/") {
-		if seg == "" {
-			continue
-		}
+			rawName, rawValue, ok := strings.Cut(seg, "=")
+			if !ok {
+				return Params{}, invalidSegment(seg)
+			}
 
-		rawName, rawValue, ok := strings.Cut(seg, "=")
-		if !ok {
-			return Params{}, invalidSegment(seg)
-		}
+			name, err := url.QueryUnescape(rawName)
+			if err != nil {
+				return Params{}, invalidSegment(seg)
+			}
 
-		name, err := url.QueryUnescape(rawName)
-		if err != nil {
-			return Params{}, invalidSegment(seg)
-		}
+			values, err := decodeValues(rawValue)
+			if err != nil {
+				return Params{}, invalidParam(name, rawValue)
+			}
 
-		values, err := decodeValues(rawValue)
-		if err != nil {
-			return Params{}, invalidParam(name, rawValue)
-		}
-
-		if err := applySegment(&p, name, values, opts.MaxWidth, opts.MaxHeight); err != nil {
-			return Params{}, err
+			if err := applySegment(&p, name, values, opts.MaxWidth, opts.MaxHeight); err != nil {
+				return Params{}, err
+			}
 		}
 	}
 
+	p.Gradient = resolveGradient(p.Gradient, opts.DefaultGradient, len(p.Colours))
 	return p, nil
+}
+
+// resolveGradient picks the background geometry: an explicit `gradient`
+// segment wins, then the configured default, then a default-angle linear
+// gradient for multi-colour keys, then a flat fill.
+func resolveGradient(seen, configured Gradient, nColours int) Gradient {
+	switch {
+	case seen.IsSet():
+		return seen
+	case configured.IsSet():
+		return configured
+	case nColours > 1:
+		return Gradient{Kind: GradientLinear, Angle: DefaultGradientAngle}
+	default:
+		return Gradient{Kind: GradientNone}
+	}
 }
 
 func decodeValues(rawValue string) ([]string, error) {
@@ -181,7 +255,9 @@ func applySegment(p *Params, name string, values []string, maxWidth, maxHeight i
 	case "size":
 		return applySingleValue(values, name, func(v string) error { return applySize(p, v, maxWidth, maxHeight) })
 	case "colour":
-		return applySingleValue(values, name, func(v string) error { return applyColour(p, v) })
+		return applyColours(p, values)
+	case "gradient":
+		return applySingleValue(values, name, func(v string) error { return applyGradient(p, v) })
 	case "text":
 		p.Text = strings.Join(values, ",")
 	case "delay":
@@ -191,8 +267,7 @@ func applySegment(p *Params, name string, values []string, maxWidth, maxHeight i
 }
 
 // applySingleValue rejects segments carrying more than one comma-separated
-// value for parameters that don't have documented multi-value (range)
-// semantics.
+// value for parameters that don't have documented multi-value semantics.
 func applySingleValue(values []string, name string, apply func(string) error) error {
 	if len(values) != 1 {
 		return invalidParam(name, strings.Join(values, ","))
@@ -245,19 +320,38 @@ func ParseSize(v string, maxWidth, maxHeight int) (width, height int, ok bool) {
 	return w, h, true
 }
 
-func applyColour(p *Params, v string) error {
-	c, ok := ParseColour(v)
+func applyColours(p *Params, values []string) error {
+	cs, ok := ParseColours(values)
 	if !ok {
-		return invalidParam("colour", v)
+		return invalidParam("colour", strings.Join(values, ","))
 	}
-	p.Colour = c
+	p.Colours = cs
 	return nil
 }
 
-// ParseColour parses the `colour` value syntax — a lowercase 6-digit hex
+// ParseColours parses the `colour` value syntax — one to MaxColours values,
+// each a lowercase 6-digit hex value without a leading '#' or a CSS named
+// colour — reporting whether every value is recognised and the list is within
+// bounds. Callers outside key parsing (e.g. configuration) use it to accept
+// the same syntax.
+func ParseColours(values []string) ([]color.RGBA, bool) {
+	if len(values) == 0 || len(values) > MaxColours {
+		return nil, false
+	}
+	cs := make([]color.RGBA, len(values))
+	for i, v := range values {
+		c, ok := ParseColour(v)
+		if !ok {
+			return nil, false
+		}
+		cs[i] = c
+	}
+	return cs, true
+}
+
+// ParseColour parses a single `colour` list member — a lowercase 6-digit hex
 // value without a leading '#', or a CSS named colour — reporting whether the
-// value is recognised. Callers outside key parsing (e.g. configuration) use
-// it to accept the same syntax.
+// value is recognised.
 func ParseColour(v string) (color.RGBA, bool) {
 	if c, ok := parseHexColour(v); ok {
 		return c, true
@@ -279,6 +373,47 @@ func parseHexColour(v string) (color.RGBA, bool) {
 		return color.RGBA{}, false
 	}
 	return color.RGBA{R: b[0], G: b[1], B: b[2], A: 0xff}, true
+}
+
+func applyGradient(p *Params, v string) error {
+	g, ok := ParseGradient(v)
+	if !ok {
+		return invalidParam("gradient", v)
+	}
+	p.Gradient = g
+	return nil
+}
+
+// ParseGradient parses the `gradient` value syntax — `linear` with an
+// optional `:{degrees}` suffix, or `radial`, `mesh` or `none` — reporting
+// whether the value is recognised. An angle is accepted only on `linear`, and
+// is normalised into [0,360) so equal geometries compare equal. Callers
+// outside key parsing (e.g. configuration) use it to accept the same syntax.
+func ParseGradient(v string) (Gradient, bool) {
+	name, angleStr, hasAngle := strings.Cut(v, ":")
+
+	var kind GradientKind
+	switch GradientKind(name) {
+	case GradientNone, GradientLinear, GradientRadial, GradientMesh:
+		kind = GradientKind(name)
+	default:
+		return Gradient{}, false
+	}
+
+	if !hasAngle {
+		if kind == GradientLinear {
+			return Gradient{Kind: kind, Angle: DefaultGradientAngle}, true
+		}
+		return Gradient{Kind: kind}, true
+	}
+	if kind != GradientLinear {
+		return Gradient{}, false
+	}
+	a, err := strconv.Atoi(angleStr)
+	if err != nil {
+		return Gradient{}, false
+	}
+	return Gradient{Kind: kind, Angle: ((a % 360) + 360) % 360}, true
 }
 
 func applyDelay(p *Params, values []string) error {

@@ -515,11 +515,11 @@ func TestGetObjectDefaultSizeFromConfig(t *testing.T) {
 
 func TestGetObjectDefaultColourFromConfig(t *testing.T) {
 	cfg := config.Config{
-		Port:          9000,
-		Buckets:       []config.BucketConfig{{Name: "placeholder", Mode: config.ModePublic}},
-		MaxWidth:      key.DefaultMaxWidth,
-		MaxHeight:     key.DefaultMaxHeight,
-		DefaultColour: color.RGBA{R: 0xff, A: 0xff},
+		Port:           9000,
+		Buckets:        []config.BucketConfig{{Name: "placeholder", Mode: config.ModePublic}},
+		MaxWidth:       key.DefaultMaxWidth,
+		MaxHeight:      key.DefaultMaxHeight,
+		DefaultColours: []color.RGBA{{R: 0xff, A: 0xff}},
 	}
 	h := NewHandler(cfg, synth.NewRouter(image.New()))
 	req := httptest.NewRequest(http.MethodGet, "/placeholder/format=png", nil)
@@ -538,5 +538,69 @@ func TestGetObjectDefaultColourFromConfig(t *testing.T) {
 	r, g, b, _ := img.At(0, 0).RGBA()
 	if r>>8 != 0xff || g>>8 != 0 || b>>8 != 0 {
 		t.Errorf("corner pixel = (%d,%d,%d), want (255,0,0)", r>>8, g>>8, b>>8)
+	}
+}
+
+func TestGetObjectWithGradient(t *testing.T) {
+	h := testHandler()
+	req := httptest.NewRequest(http.MethodGet, "/placeholder/format=png/size=200x100/colour=ff0000,0000ff/gradient=linear:90", nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	img, err := png.Decode(bytes.NewReader(rec.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("failed to decode PNG: %v", err)
+	}
+	left, _, _, _ := img.At(0, 50).RGBA()
+	_, _, right, _ := img.At(199, 50).RGBA()
+	if left>>8 < 0xf0 || right>>8 < 0xf0 {
+		t.Errorf("gradient ends = red %d, blue %d, want both near 255", left>>8, right>>8)
+	}
+}
+
+func TestGetObjectDefaultGradientFromConfig(t *testing.T) {
+	cfg := config.Config{
+		Port:            9000,
+		Buckets:         []config.BucketConfig{{Name: "placeholder", Mode: config.ModePublic}},
+		MaxWidth:        key.DefaultMaxWidth,
+		MaxHeight:       key.DefaultMaxHeight,
+		DefaultColours:  []color.RGBA{{R: 0xff, A: 0xff}, {B: 0xff, A: 0xff}},
+		DefaultGradient: key.Gradient{Kind: key.GradientRadial},
+	}
+	h := NewHandler(cfg, synth.NewRouter(image.New()))
+	req := httptest.NewRequest(http.MethodGet, "/placeholder/size=200x100", nil)
+	req.Host = "localhost"
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), "<radialGradient") {
+		t.Errorf("body = %s, want a radial gradient from DEFAULT_GRADIENT", rec.Body.String())
+	}
+}
+
+func TestGetObjectInvalidGradientReturns400(t *testing.T) {
+	h := testHandler()
+	for _, v := range []string{"spiral", "radial:45", "linear:abc"} {
+		req := httptest.NewRequest(http.MethodGet, "/placeholder/gradient="+v, nil)
+		req.Host = "localhost"
+		rec := httptest.NewRecorder()
+
+		h.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("gradient=%s: status = %d, want %d", v, rec.Code, http.StatusBadRequest)
+		}
+		if !strings.Contains(rec.Body.String(), "InvalidArgument") {
+			t.Errorf("gradient=%s: body = %s, want InvalidArgument", v, rec.Body.String())
+		}
 	}
 }

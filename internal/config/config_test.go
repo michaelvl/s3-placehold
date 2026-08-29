@@ -2,6 +2,8 @@ package config
 
 import (
 	"image/color"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +20,7 @@ func TestLoadZeroConfigDefault(t *testing.T) {
 	t.Setenv("DEFAULT_DELAY_MS", "")
 	t.Setenv("DEFAULT_SIZE", "")
 	t.Setenv("DEFAULT_COLOUR", "")
+	t.Setenv("DEFAULT_GRADIENT", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -48,8 +51,11 @@ func TestLoadZeroConfigDefault(t *testing.T) {
 	if cfg.DefaultWidth != key.DefaultWidth || cfg.DefaultHeight != key.DefaultHeight {
 		t.Errorf("DefaultWidth/Height = %dx%d, want %dx%d", cfg.DefaultWidth, cfg.DefaultHeight, key.DefaultWidth, key.DefaultHeight)
 	}
-	if cfg.DefaultColour != key.DefaultColour() {
-		t.Errorf("DefaultColour = %+v, want %+v", cfg.DefaultColour, key.DefaultColour())
+	if !reflect.DeepEqual(cfg.DefaultColours, key.DefaultColours()) {
+		t.Errorf("DefaultColours = %+v, want %+v", cfg.DefaultColours, key.DefaultColours())
+	}
+	if cfg.DefaultGradient != (key.Gradient{}) {
+		t.Errorf("DefaultGradient = %+v, want zero value", cfg.DefaultGradient)
 	}
 }
 
@@ -220,8 +226,8 @@ func TestLoadDefaultColour(t *testing.T) {
 	}
 
 	want := color.RGBA{R: 0xff, A: 0xff}
-	if cfg.DefaultColour != want {
-		t.Errorf("DefaultColour = %+v, want %+v", cfg.DefaultColour, want)
+	if !reflect.DeepEqual(cfg.DefaultColours, []color.RGBA{want}) {
+		t.Errorf("DefaultColours = %+v, want [%+v]", cfg.DefaultColours, want)
 	}
 }
 
@@ -234,8 +240,8 @@ func TestLoadDefaultColourNamed(t *testing.T) {
 	}
 
 	want := color.RGBA{R: 0xad, G: 0xd8, B: 0xe6, A: 0xff} // CSS lightblue
-	if cfg.DefaultColour != want {
-		t.Errorf("DefaultColour = %+v, want %+v", cfg.DefaultColour, want)
+	if !reflect.DeepEqual(cfg.DefaultColours, []color.RGBA{want}) {
+		t.Errorf("DefaultColours = %+v, want [%+v]", cfg.DefaultColours, want)
 	}
 }
 
@@ -244,6 +250,52 @@ func TestLoadInvalidDefaultColour(t *testing.T) {
 		t.Setenv("DEFAULT_COLOUR", v)
 		if _, err := Load(); err == nil {
 			t.Errorf("Load(DEFAULT_COLOUR=%s) = nil error, want error", v)
+		}
+	}
+}
+
+func TestLoadDefaultColourList(t *testing.T) {
+	t.Setenv("DEFAULT_COLOUR", "ff0000,lightblue")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	want := []color.RGBA{{R: 0xff, A: 0xff}, {R: 0xad, G: 0xd8, B: 0xe6, A: 0xff}}
+	if !reflect.DeepEqual(cfg.DefaultColours, want) {
+		t.Errorf("DefaultColours = %+v, want %+v", cfg.DefaultColours, want)
+	}
+}
+
+func TestLoadInvalidDefaultColourList(t *testing.T) {
+	for _, v := range []string{"ff0000,notacolour", "ff0000,", strings.Repeat("ff0000,", key.MaxColours) + "ff0000"} {
+		t.Setenv("DEFAULT_COLOUR", v)
+		if _, err := Load(); err == nil {
+			t.Errorf("Load with DEFAULT_COLOUR=%q = nil error, want error", v)
+		}
+	}
+}
+
+func TestLoadDefaultGradient(t *testing.T) {
+	t.Setenv("DEFAULT_GRADIENT", "linear:45")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	want := key.Gradient{Kind: key.GradientLinear, Angle: 45}
+	if cfg.DefaultGradient != want {
+		t.Errorf("DefaultGradient = %+v, want %+v", cfg.DefaultGradient, want)
+	}
+}
+
+func TestLoadInvalidDefaultGradient(t *testing.T) {
+	for _, v := range []string{"spiral", "radial:45", "linear:abc"} {
+		t.Setenv("DEFAULT_GRADIENT", v)
+		if _, err := Load(); err == nil {
+			t.Errorf("Load with DEFAULT_GRADIENT=%q = nil error, want error", v)
 		}
 	}
 }

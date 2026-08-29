@@ -68,7 +68,7 @@ func TestSynthesizePNG(t *testing.T) {
 	params.Format = "png"
 	params.Width = 200
 	params.Height = 300
-	params.Colour = color.RGBA{R: 0xff, A: 0xff}
+	params.Colours = []color.RGBA{{R: 0xff, A: 0xff}}
 
 	data, mimeType, err := s.Synthesize(params)
 	if err != nil {
@@ -121,7 +121,7 @@ func TestSynthesizePNGWithTextOverlayDrawsContrastingPixels(t *testing.T) {
 	params.Format = "png"
 	params.Width = 200
 	params.Height = 100
-	params.Colour = color.RGBA{R: 0xff, A: 0xff} // red background -> light text expected
+	params.Colours = []color.RGBA{{R: 0xff, A: 0xff}} // red background -> light text expected
 	params.Text = "HELLO"
 
 	data, _, err := s.Synthesize(params)
@@ -134,7 +134,7 @@ func TestSynthesizePNGWithTextOverlayDrawsContrastingPixels(t *testing.T) {
 		t.Fatalf("failed to decode PNG: %v", err)
 	}
 
-	if !containsNonBackgroundPixel(img, params.Colour) {
+	if !containsNonBackgroundPixel(img, params.BaseColour()) {
 		t.Errorf("expected text overlay to draw at least one non-background pixel")
 	}
 }
@@ -177,7 +177,7 @@ func TestSynthesizePNGTextSpansImageWidth(t *testing.T) {
 	params.Format = "png"
 	params.Width = 200
 	params.Height = 1000 // tall enough that width, not height, is the binding constraint
-	params.Colour = color.RGBA{R: 0xff, A: 0xff}
+	params.Colours = []color.RGBA{{R: 0xff, A: 0xff}}
 	params.Text = "HELLO"
 
 	data, _, err := s.Synthesize(params)
@@ -189,7 +189,7 @@ func TestSynthesizePNGTextSpansImageWidth(t *testing.T) {
 		t.Fatalf("failed to decode PNG: %v", err)
 	}
 
-	minX, maxX := nonBackgroundColumnRange(img, params.Colour)
+	minX, maxX := nonBackgroundColumnRange(img, params.BaseColour())
 	if minX == -1 {
 		t.Fatalf("no text pixels found")
 	}

@@ -36,7 +36,8 @@ type Config struct {
 	MaxHeight       int
 	DefaultWidth    int
 	DefaultHeight   int
-	DefaultColour   color.RGBA
+	DefaultColours  []color.RGBA
+	DefaultGradient key.Gradient
 	DefaultDelayMin time.Duration
 	DefaultDelayMax time.Duration
 }
@@ -93,11 +94,17 @@ func Load() (Config, error) {
 	cfg.DefaultWidth = defWidth
 	cfg.DefaultHeight = defHeight
 
-	defColour, err := parseDefaultColour()
+	defColours, err := parseDefaultColours()
 	if err != nil {
 		return Config{}, err
 	}
-	cfg.DefaultColour = defColour
+	cfg.DefaultColours = defColours
+
+	defGradient, err := parseDefaultGradient()
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.DefaultGradient = defGradient
 
 	delayMin, delayMax, err := parseDefaultDelay()
 	if err != nil {
@@ -125,20 +132,37 @@ func parseDefaultSize(maxWidth, maxHeight int) (width, height int, err error) {
 	return w, h, nil
 }
 
-// parseDefaultColour parses DEFAULT_COLOUR, the background fill used for
+// parseDefaultColours parses DEFAULT_COLOUR, the background fill used for
 // requests whose key carries no `colour` segment. It accepts the same syntax
-// as that segment — lowercase hex without '#', or a CSS named colour — and
-// falls back to the built-in cccccc when unset.
-func parseDefaultColour() (color.RGBA, error) {
+// as that segment — a comma-separated list of up to key.MaxColours lowercase
+// hex values without '#', or CSS named colours — and falls back to the
+// built-in cccccc when unset.
+func parseDefaultColours() ([]color.RGBA, error) {
 	raw := os.Getenv("DEFAULT_COLOUR")
 	if raw == "" {
-		return key.DefaultColour(), nil
+		return key.DefaultColours(), nil
 	}
-	c, ok := key.ParseColour(raw)
+	cs, ok := key.ParseColours(strings.Split(raw, ","))
 	if !ok {
-		return color.RGBA{}, fmt.Errorf("invalid DEFAULT_COLOUR %q: must be lowercase hex without '#' (\"cccccc\") or a CSS colour name (\"lightblue\")", raw)
+		return nil, fmt.Errorf("invalid DEFAULT_COLOUR %q: must be up to %d comma-separated lowercase hex values without '#' (\"cccccc\") or CSS colour names (\"lightblue\")", raw, key.MaxColours)
 	}
-	return c, nil
+	return cs, nil
+}
+
+// parseDefaultGradient parses DEFAULT_GRADIENT, the background geometry used
+// for requests whose key carries no `gradient` segment. It accepts the same
+// syntax as that segment, and yields the zero Gradient when unset, which
+// leaves the geometry to be chosen from the number of colours.
+func parseDefaultGradient() (key.Gradient, error) {
+	raw := os.Getenv("DEFAULT_GRADIENT")
+	if raw == "" {
+		return key.Gradient{}, nil
+	}
+	g, ok := key.ParseGradient(raw)
+	if !ok {
+		return key.Gradient{}, fmt.Errorf("invalid DEFAULT_GRADIENT %q: must be \"linear\" with an optional angle (\"linear:45\"), \"radial\", \"mesh\" or \"none\"", raw)
+	}
+	return g, nil
 }
 
 // parseDefaultDelay parses DEFAULT_DELAY_MS, the delay applied to requests

@@ -113,34 +113,121 @@ func encodeRaster(img stdimage.Image, enc func(io.Writer, stdimage.Image) error,
 	return buf.Bytes(), mimeType, nil
 }
 
+// SVG element ids for generated gradients. They are namespaced because an
+// SVG inlined into a host document shares its id space, and machine-generated
+// because attribute values are emitted unescaped.
+const (
+	gradientID   = "sph-g"
+	meshIDPrefix = "sph-b"
+)
+
 func renderSVG(params key.Params) []byte {
+	cs := colours(params)
+	spec := gradientGeometry(params.Width, params.Height, cs, params.Gradient)
+
 	var b strings.Builder
-	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d">`, params.Width, params.Height)
-	fmt.Fprintf(&b, `<rect width="100%%" height="100%%" fill="%s"/>`, colourHex(params.Colour))
+	// The viewBox is what keeps a userSpaceOnUse gradient attached to the box
+	// when the image is displayed at a size other than its intrinsic one.
+	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">`,
+		params.Width, params.Height, params.Width, params.Height)
+	writeBackground(&b, spec)
 	if params.Text != "" {
 		size := fitFontSize(params.Width, params.Height, params.Text)
 		fmt.Fprintf(&b, `<text x="50%%" y="50%%" fill="%s" font-size="%.1f" text-anchor="middle" dominant-baseline="middle">%s</text>`,
-			colourHex(contrastColour(params.Colour)), size, xmlEscapeText(params.Text))
+			colourHex(contrastColour(averageColour(cs))), size, xmlEscapeText(params.Text))
 	}
 	b.WriteString(`</svg>`)
 	return []byte(b.String())
 }
 
+// writeBackground emits the fill described by spec: a plain rect for a flat
+// colour, or gradient definitions plus the rects that reference them.
+func writeBackground(b *strings.Builder, spec gradientSpec) {
+	switch spec.kind {
+	case key.GradientLinear:
+		fmt.Fprintf(b, `<defs><linearGradient id="%s" gradientUnits="userSpaceOnUse" x1="%s" y1="%s" x2="%s" y2="%s">`,
+			gradientID, svgNum(spec.x1), svgNum(spec.y1), svgNum(spec.x2), svgNum(spec.y2))
+		writeStops(b, spec.stops)
+		b.WriteString(`</linearGradient></defs>`)
+		writeFullBleedRect(b, "url(#"+gradientID+")")
+	case key.GradientRadial:
+		fmt.Fprintf(b, `<defs><radialGradient id="%s" gradientUnits="userSpaceOnUse" cx="%s" cy="%s" r="%s">`,
+			gradientID, svgNum(spec.cx), svgNum(spec.cy), svgNum(spec.r))
+		writeStops(b, spec.stops)
+		b.WriteString(`</radialGradient></defs>`)
+		writeFullBleedRect(b, "url(#"+gradientID+")")
+	case key.GradientMesh:
+		b.WriteString(`<defs>`)
+		for i, bl := range spec.blobs {
+			hex := colourHex(bl.colour)
+			fmt.Fprintf(b, `<radialGradient id="%s%d" gradientUnits="userSpaceOnUse" cx="%s" cy="%s" r="%s">`,
+				meshIDPrefix, i, svgNum(bl.cx), svgNum(bl.cy), svgNum(bl.r))
+			// Both stops carry the same stop-color, fading only stop-opacity.
+			// SVG leaves it open whether stops interpolate in premultiplied
+			// alpha and renderers differ; with identical RGB the two are
+			// provably equal, so a blob paints the same everywhere. Fading
+			// towards the base colour instead would be renderer-dependent.
+			fmt.Fprintf(b, `<stop offset="0" stop-color="%s" stop-opacity="1"/><stop offset="1" stop-color="%s" stop-opacity="0"/></radialGradient>`,
+				hex, hex)
+		}
+		b.WriteString(`</defs>`)
+		writeFullBleedRect(b, colourHex(spec.base))
+		for i := range spec.blobs {
+			writeFullBleedRect(b, fmt.Sprintf("url(#%s%d)", meshIDPrefix, i))
+		}
+	default:
+		writeFullBleedRect(b, colourHex(spec.base))
+	}
+}
+
+func writeStops(b *strings.Builder, stops []stop) {
+	for _, st := range stops {
+		fmt.Fprintf(b, `<stop offset="%s" stop-color="%s"/>`, svgNum(st.offset), colourHex(st.colour))
+	}
+}
+
+func writeFullBleedRect(b *strings.Builder, fill string) {
+	fmt.Fprintf(b, `<rect width="100%%" height="100%%" fill="%s"/>`, fill)
+}
+
 func renderRaster(params key.Params) *stdimage.RGBA {
+	cs := colours(params)
 	rect := stdimage.Rect(0, 0, params.Width, params.Height)
 	img := stdimage.NewRGBA(rect)
-	draw.Draw(img, rect, &stdimage.Uniform{C: params.Colour}, stdimage.Point{}, draw.Src)
+
+	spec := gradientGeometry(params.Width, params.Height, cs, params.Gradient)
+	if spec.kind == key.GradientNone {
+		draw.Draw(img, rect, &stdimage.Uniform{C: spec.base}, stdimage.Point{}, draw.Src)
+	} else {
+		fillGradient(img, spec)
+	}
+
 	if params.Text != "" {
-		drawText(img, params)
+		drawText(img, params, contrastColour(averageColour(cs)))
 	}
 	return img
 }
 
-func drawText(img *stdimage.RGBA, params key.Params) {
+// fillGradient samples spec into every pixel, writing the buffer directly to
+// avoid a bounds check per pixel.
+func fillGradient(img *stdimage.RGBA, spec gradientSpec) {
+	sampler := spec.sampler()
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		row := img.Pix[img.PixOffset(bounds.Min.X, y):]
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			c := sampler.at(x, y)
+			i := (x - bounds.Min.X) * 4
+			row[i], row[i+1], row[i+2], row[i+3] = c.R, c.G, c.B, c.A
+		}
+	}
+}
+
+func drawText(img *stdimage.RGBA, params key.Params, textColour color.RGBA) {
 	face := newFace(fitFontSize(params.Width, params.Height, params.Text))
 	d := &font.Drawer{
 		Dst:  img,
-		Src:  stdimage.NewUniform(contrastColour(params.Colour)),
+		Src:  stdimage.NewUniform(textColour),
 		Face: face,
 	}
 	textWidth := d.MeasureString(params.Text).Ceil()
@@ -148,6 +235,34 @@ func drawText(img *stdimage.RGBA, params key.Params) {
 	y := (params.Height + face.Metrics().Ascent.Ceil()) / 2
 	d.Dot = fixed.P(x, y)
 	d.DrawString(params.Text)
+}
+
+// colours returns the background colours of params, substituting the built-in
+// default so the renderers never have to handle an empty list.
+func colours(params key.Params) []color.RGBA {
+	if len(params.Colours) == 0 {
+		return key.DefaultColours()
+	}
+	return params.Colours
+}
+
+// averageColour returns the component-wise mean of cs — the stand-in for "the
+// background" when picking a contrasting text colour. Averaging the
+// components and then taking luminance is exactly equivalent to averaging the
+// luminances, because contrastColour's luminance is linear in R, G and B.
+// That equivalence would not survive a switch to sRGB-linearised luminance.
+func averageColour(cs []color.RGBA) color.RGBA {
+	if len(cs) == 0 {
+		return key.DefaultColour()
+	}
+	var r, g, b int
+	for _, c := range cs {
+		r += int(c.R)
+		g += int(c.G)
+		b += int(c.B)
+	}
+	n := len(cs)
+	return color.RGBA{R: uint8(r / n), G: uint8(g / n), B: uint8(b / n), A: 0xff}
 }
 
 // contrastColour returns black or white, whichever contrasts better against
