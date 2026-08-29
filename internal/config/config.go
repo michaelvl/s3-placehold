@@ -3,7 +3,6 @@ package config
 
 import (
 	"fmt"
-	"image/color"
 	"os"
 	"strconv"
 	"strings"
@@ -36,7 +35,7 @@ type Config struct {
 	MaxHeight       int
 	DefaultWidth    int
 	DefaultHeight   int
-	DefaultColours  []color.RGBA
+	DefaultColours  []key.ColourSpec
 	DefaultGradient key.Gradient
 	DefaultDelayMin time.Duration
 	DefaultDelayMax time.Duration
@@ -135,18 +134,23 @@ func parseDefaultSize(maxWidth, maxHeight int) (width, height int, err error) {
 // parseDefaultColours parses DEFAULT_COLOUR, the background fill used for
 // requests whose key carries no `colour` segment. It accepts the same syntax
 // as that segment — a comma-separated list of up to key.MaxColours lowercase
-// hex values without '#', or CSS named colours — and falls back to the
-// built-in cccccc when unset.
-func parseDefaultColours() ([]color.RGBA, error) {
+// hex values without '#', CSS named colours, or `random` — and falls back to
+// the built-in cccccc when unset.
+//
+// The result is a list of unresolved specs, not colours: a `random` here is
+// resolved per request, against that request's key, so DEFAULT_COLOUR=random
+// gives every distinct key its own stable colour rather than picking one
+// colour at startup.
+func parseDefaultColours() ([]key.ColourSpec, error) {
 	raw := os.Getenv("DEFAULT_COLOUR")
 	if raw == "" {
-		return key.DefaultColours(), nil
+		return key.DefaultColourSpecs(), nil
 	}
-	cs, ok := key.ParseColours(strings.Split(raw, ","))
+	specs, ok := key.ParseColourSpecs(strings.Split(raw, ","))
 	if !ok {
-		return nil, fmt.Errorf("invalid DEFAULT_COLOUR %q: must be up to %d comma-separated lowercase hex values without '#' (\"cccccc\") or CSS colour names (\"lightblue\")", raw, key.MaxColours)
+		return nil, fmt.Errorf("invalid DEFAULT_COLOUR %q: must be up to %d comma-separated lowercase hex values without '#' (\"cccccc\"), CSS colour names (\"lightblue\") or \"random\"", raw, key.MaxColours)
 	}
-	return cs, nil
+	return specs, nil
 }
 
 // parseDefaultGradient parses DEFAULT_GRADIENT, the background geometry used

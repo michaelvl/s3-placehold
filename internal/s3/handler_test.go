@@ -519,7 +519,7 @@ func TestGetObjectDefaultColourFromConfig(t *testing.T) {
 		Buckets:        []config.BucketConfig{{Name: "placeholder", Mode: config.ModePublic}},
 		MaxWidth:       key.DefaultMaxWidth,
 		MaxHeight:      key.DefaultMaxHeight,
-		DefaultColours: []color.RGBA{{R: 0xff, A: 0xff}},
+		DefaultColours: []key.ColourSpec{key.FixedColour(color.RGBA{R: 0xff, A: 0xff})},
 	}
 	h := NewHandler(cfg, synth.NewRouter(image.New()))
 	req := httptest.NewRequest(http.MethodGet, "/placeholder/format=png", nil)
@@ -538,6 +538,43 @@ func TestGetObjectDefaultColourFromConfig(t *testing.T) {
 	r, g, b, _ := img.At(0, 0).RGBA()
 	if r>>8 != 0xff || g>>8 != 0 || b>>8 != 0 {
 		t.Errorf("corner pixel = (%d,%d,%d), want (255,0,0)", r>>8, g>>8, b>>8)
+	}
+}
+
+func TestGetObjectRandomDefaultColourVariesPerKey(t *testing.T) {
+	// DEFAULT_COLOUR=random is resolved per request, so two keys served by the
+	// same process render different colours, and each is stable.
+	cfg := config.Config{
+		Port:           9000,
+		Buckets:        []config.BucketConfig{{Name: "placeholder", Mode: config.ModePublic}},
+		MaxWidth:       key.DefaultMaxWidth,
+		MaxHeight:      key.DefaultMaxHeight,
+		DefaultColours: []key.ColourSpec{{Random: true}},
+	}
+	h := NewHandler(cfg, synth.NewRouter(image.New()))
+
+	corner := func(objectKey string) color.Color {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/placeholder/"+objectKey, nil)
+		req.Host = "localhost"
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+		}
+		img, err := png.Decode(bytes.NewReader(rec.Body.Bytes()))
+		if err != nil {
+			t.Fatalf("failed to decode PNG: %v", err)
+		}
+		return img.At(0, 0)
+	}
+
+	alice := corner("format=png/text=alice")
+	if bob := corner("format=png/text=bob"); alice == bob {
+		t.Errorf("different keys both rendered %+v", alice)
+	}
+	if again := corner("format=png/text=alice"); again != alice {
+		t.Errorf("same key rendered %+v then %+v", alice, again)
 	}
 }
 
@@ -569,7 +606,7 @@ func TestGetObjectDefaultGradientFromConfig(t *testing.T) {
 		Buckets:         []config.BucketConfig{{Name: "placeholder", Mode: config.ModePublic}},
 		MaxWidth:        key.DefaultMaxWidth,
 		MaxHeight:       key.DefaultMaxHeight,
-		DefaultColours:  []color.RGBA{{R: 0xff, A: 0xff}, {B: 0xff, A: 0xff}},
+		DefaultColours:  []key.ColourSpec{key.FixedColour(color.RGBA{R: 0xff, A: 0xff}), key.FixedColour(color.RGBA{B: 0xff, A: 0xff})},
 		DefaultGradient: key.Gradient{Kind: key.GradientRadial},
 	}
 	h := NewHandler(cfg, synth.NewRouter(image.New()))

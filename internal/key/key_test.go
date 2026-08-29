@@ -357,20 +357,21 @@ func TestParseSizeValues(t *testing.T) {
 
 func TestParseWithOptionsDefaultColourApplied(t *testing.T) {
 	opts := DefaultOptions()
-	opts.DefaultColours = []color.RGBA{{R: 0x11, G: 0x22, B: 0x33, A: 0xff}}
+	want := color.RGBA{R: 0x11, G: 0x22, B: 0x33, A: 0xff}
+	opts.DefaultColours = []ColourSpec{FixedColour(want)}
 
 	got, err := ParseWithOptions("/format=png", opts)
 	if err != nil {
 		t.Fatalf("ParseWithOptions returned error: %v", err)
 	}
-	if got.BaseColour() != opts.DefaultColours[0] {
-		t.Errorf("Colour = %+v, want %+v", got.BaseColour(), opts.DefaultColours[0])
+	if got.BaseColour() != want {
+		t.Errorf("Colour = %+v, want %+v", got.BaseColour(), want)
 	}
 }
 
 func TestParseWithOptionsColourSegmentOverridesDefault(t *testing.T) {
 	opts := DefaultOptions()
-	opts.DefaultColours = []color.RGBA{{R: 0x11, G: 0x22, B: 0x33, A: 0xff}}
+	opts.DefaultColours = []ColourSpec{FixedColour(color.RGBA{R: 0x11, G: 0x22, B: 0x33, A: 0xff})}
 
 	got, err := ParseWithOptions("/colour=ff0000", opts)
 	if err != nil {
@@ -552,14 +553,15 @@ func TestParseWithOptionsDefaultGradient(t *testing.T) {
 
 func TestParseWithOptionsDefaultColourList(t *testing.T) {
 	opts := DefaultOptions()
-	opts.DefaultColours = []color.RGBA{{R: 0xff, A: 0xff}, {B: 0xff, A: 0xff}}
+	want := []color.RGBA{{R: 0xff, A: 0xff}, {B: 0xff, A: 0xff}}
+	opts.DefaultColours = []ColourSpec{FixedColour(want[0]), FixedColour(want[1])}
 
 	got, err := ParseWithOptions("/format=png", opts)
 	if err != nil {
 		t.Fatalf("ParseWithOptions returned error: %v", err)
 	}
-	if !reflect.DeepEqual(got.Colours, opts.DefaultColours) {
-		t.Errorf("Colours = %+v, want %+v", got.Colours, opts.DefaultColours)
+	if !reflect.DeepEqual(got.Colours, want) {
+		t.Errorf("Colours = %+v, want %+v", got.Colours, want)
 	}
 }
 
@@ -567,7 +569,7 @@ func TestParseWithOptionsDoesNotAliasDefaultColours(t *testing.T) {
 	// Options is built once per server and shared across concurrent requests,
 	// so its backing array must never reach a caller's Params.
 	opts := DefaultOptions()
-	opts.DefaultColours = []color.RGBA{{R: 0xff, A: 0xff}}
+	opts.DefaultColours = []ColourSpec{FixedColour(color.RGBA{R: 0xff, A: 0xff})}
 
 	first, err := ParseWithOptions("/format=png", opts)
 	if err != nil {
@@ -593,13 +595,25 @@ func TestParseGradientValues(t *testing.T) {
 	}
 }
 
-func TestParseColoursValues(t *testing.T) {
-	cs, ok := ParseColours([]string{"ff0000", "lightblue"})
-	if !ok || len(cs) != 2 {
-		t.Fatalf("ParseColours = %+v, %v", cs, ok)
+func TestParseColourSpecsValues(t *testing.T) {
+	specs, ok := ParseColourSpecs([]string{"ff0000", "lightblue", "random", "random:pinned"})
+	if !ok || len(specs) != 4 {
+		t.Fatalf("ParseColourSpecs = %+v, %v", specs, ok)
 	}
-	if _, ok := ParseColours(nil); ok {
-		t.Error("ParseColours(nil) = ok, want not ok")
+	want := []ColourSpec{
+		FixedColour(color.RGBA{R: 0xff, A: 0xff}),
+		FixedColour(color.RGBA{R: 0xad, G: 0xd8, B: 0xe6, A: 0xff}),
+		{Random: true},
+		{Random: true, Seed: "pinned"},
+	}
+	if !reflect.DeepEqual(specs, want) {
+		t.Errorf("ParseColourSpecs = %+v, want %+v", specs, want)
+	}
+	if _, ok := ParseColourSpecs(nil); ok {
+		t.Error("ParseColourSpecs(nil) = ok, want not ok")
+	}
+	if _, ok := ParseColourSpecs([]string{"random:"}); ok {
+		t.Error("ParseColourSpecs(random:) = ok, want not ok")
 	}
 }
 

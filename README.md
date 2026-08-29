@@ -104,10 +104,54 @@ order, all optional:
 | `type`   | `image`                                                                  | `image`   | Routes to a synthesis pipeline. Only `image` exists today; unknown values → 400. |
 | `format` | `svg` \| `png` \| `jpeg`                                                 | `svg`     | Output format and `Content-Type`. Other values → 400.                            |
 | `size`   | `{width}x{height}`, e.g. `200x300`                                       | `DEFAULT_SIZE` (`100x100`) | Pixels. Non-integer or non-positive → 400.                            |
-| `colour` | Up to 8 comma-separated values, each lowercase hex without `#` (`ff0000`) or a CSS named colour (`lightblue`) | `DEFAULT_COLOUR` (`cccccc`) | Background fill. Two or more colours are painted as a gradient. Unrecognised value, or more than 8 → 400. |
+| `colour` | Up to 8 comma-separated values, each lowercase hex without `#` (`ff0000`), a CSS named colour (`lightblue`), or `random` / `random:{seed}` | `DEFAULT_COLOUR` (`cccccc`) | Background fill. Two or more colours are painted as a gradient. Unrecognised value, or more than 8 → 400. |
 | `gradient` | `linear` with an optional angle (`linear:45`) \| `radial` \| `mesh` \| `none` | `DEFAULT_GRADIENT`, else `linear:90` for multi-colour keys and `none` otherwise | Geometry the `colour` list is painted with. Needs two or more colours — anything but `none` with a single colour → 400. Other values → 400. |
 | `text`   | URL-encoded string, `+` = space                                          | _(none)_  | Overlaid on the image; colour auto-contrasts against the background.             |
 | `delay`  | Fixed ms (`200`) or an inclusive random range (`100,500`)                | `DEFAULT_DELAY_MS` | Server sleeps before responding, to simulate slow storage. Defaults to no delay unless `DEFAULT_DELAY_MS` is set; an explicit `delay` (including `delay=0`) overrides it. |
+
+### Random colours
+
+Any `colour` list member can be `random`, which picks a stable colour rather
+than a different one per request — the same key always renders the same image:
+
+```
+/text=alice/colour=random              # a colour derived from this key
+/colour=random:avatar42                # a colour derived from "avatar42"
+/colour=random,random/gradient=mesh    # a random multi-colour mesh
+/colour=ff0000,random                  # mix fixed and random
+```
+
+`random:{seed}` hashes the seed you give it and nothing else, so the colour is
+pinned no matter what else the key contains. Bare `random` hashes the `size`
+and `text` of the request, plus the member's position in the `colour` list.
+That means:
+
+- `format` and `delay` are **not** part of the seed, so asking for the same
+  image as PNG instead of SVG keeps its colour.
+- Segment order is not part of the seed either — the hash is built from parsed
+  values, so `/size=100x100/text=hi` and `/text=hi/size=100x100` agree.
+- Position **is** part of the seed, so `colour=random,random` gives two
+  different colours rather than a degenerate one-colour gradient. Adding a
+  colour to the front of a list shifts the ones after it.
+
+Colours vary in hue at a fixed saturation and lightness, so every result is
+vivid rather than muddy. The hash, that mapping and the seed construction are
+fixed: they define which colour a seed produces, and changing them would
+repaint every existing `colour=random` URL.
+
+`DEFAULT_COLOUR` accepts `random` too, and is resolved per request rather than
+once at startup — so `DEFAULT_COLOUR=random` gives *every distinct key* its own
+stable colour without any key having to ask, and `DEFAULT_COLOUR=random,random`
+does the same with a gradient.
+
+A seed collapses that back to a single colour. `random:{seed}` ignores the
+request by definition, so as a server-wide default it renders the same colour
+for every key — `DEFAULT_COLOUR=random:staging` behaves exactly as if you had
+written that colour's hex. The point is to *name* a colour rather than choose
+one: two deployments set `random:staging` and `random:prod` and get two
+distinct, vivid colours without anyone picking hex values or checking they are
+far enough apart. The trade is that you cannot tell what colour a seed gives
+until you run the server and look.
 
 ### Gradients
 
@@ -159,7 +203,7 @@ All configuration is via environment variables:
 | `MAX_X_PIXELS`          | Maximum allowed `size` width, in pixels                | `10000`              |
 | `MAX_Y_PIXELS`          | Maximum allowed `size` height, in pixels               | `10000`              |
 | `DEFAULT_SIZE`          | Size for keys with no `size` segment, as `{width}x{height}` | `100x100`       |
-| `DEFAULT_COLOUR`        | Background fill for keys with no `colour` segment: up to 8 comma-separated hex values or CSS colour names | `cccccc` |
+| `DEFAULT_COLOUR`        | Background fill for keys with no `colour` segment: up to 8 comma-separated hex values, CSS colour names, or `random` / `random:{seed}` | `cccccc` |
 | `DEFAULT_GRADIENT`      | Gradient geometry for keys with no `gradient` segment: `linear[:deg]`, `radial`, `mesh` or `none` | _(none)_ |
 | `DEFAULT_DELAY_MS`      | Delay for keys with no `delay` segment: fixed ms (`200`) or a range (`100,500`) | `0` (no delay) |
 

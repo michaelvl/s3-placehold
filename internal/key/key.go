@@ -96,19 +96,45 @@ func DefaultColours() []color.RGBA {
 	return []color.RGBA{DefaultColour()}
 }
 
+// ColourSpec is a `colour` list member before it has been resolved to a
+// colour: either a fixed colour, or a request for a stable pseudo-random one.
+// Random members cannot be resolved where they are parsed, because a seedless
+// `random` draws on the request's `size` and `text` — which may appear in a
+// later segment of the key, and which a configured default does not know at
+// all until a request arrives. Resolution happens once per request, at the end
+// of parsing, in resolveColours.
+type ColourSpec struct {
+	Colour color.RGBA // the colour, when Random is false
+	Random bool
+	Seed   string // explicit seed for a random member; "" derives one from the request
+}
+
+// FixedColour returns a ColourSpec for an already-known colour.
+func FixedColour(c color.RGBA) ColourSpec { return ColourSpec{Colour: c} }
+
+// DefaultColourSpecs returns DefaultColour as a one-element spec list, the
+// shape Options.DefaultColours takes when no colour is configured.
+func DefaultColourSpecs() []ColourSpec {
+	return []ColourSpec{FixedColour(DefaultColour())}
+}
+
 // Options carries server configuration into key parsing: the size caps a
 // `size` segment is checked against, and the size, colours, gradient and delay
 // applied to keys that carry no `size` / `colour` / `gradient` / `delay`
 // segment. A zero DefaultWidth or DefaultHeight means the built-in
-// DefaultWidth/DefaultHeight, an empty DefaultColours means DefaultColours(),
-// an unset DefaultGradient means the geometry is chosen from the number of
-// colours, and a zero delay means no delay.
+// DefaultWidth/DefaultHeight, an empty DefaultColours means
+// DefaultColourSpecs(), an unset DefaultGradient means the geometry is chosen
+// from the number of colours, and a zero delay means no delay.
+//
+// DefaultColours holds unresolved specs rather than colours so that a
+// configured default can be `random`: it is resolved per request, against that
+// request's key, not once at startup.
 type Options struct {
 	MaxWidth        int
 	MaxHeight       int
 	DefaultWidth    int
 	DefaultHeight   int
-	DefaultColours  []color.RGBA
+	DefaultColours  []ColourSpec
 	DefaultGradient Gradient
 	DefaultDelayMin time.Duration
 	DefaultDelayMax time.Duration
@@ -122,7 +148,7 @@ func DefaultOptions() Options {
 		MaxHeight:      DefaultMaxHeight,
 		DefaultWidth:   DefaultWidth,
 		DefaultHeight:  DefaultHeight,
-		DefaultColours: DefaultColours(),
+		DefaultColours: DefaultColourSpecs(),
 	}
 }
 
@@ -181,12 +207,15 @@ func ParseWithOptions(rawKey string, opts Options) (Params, error) {
 	if opts.DefaultWidth > 0 && opts.DefaultHeight > 0 {
 		p.Width, p.Height = opts.DefaultWidth, opts.DefaultHeight
 	}
-	if len(opts.DefaultColours) > 0 {
-		// Copied: opts is built once per server and shared across concurrent
-		// requests, so the backing array must not escape into Params.
-		p.Colours = append([]color.RGBA(nil), opts.DefaultColours...)
-	}
 	p.DelayMin, p.DelayMax = opts.DefaultDelayMin, opts.DefaultDelayMax
+
+	st := parseState{params: &p, colours: DefaultColourSpecs()}
+	if len(opts.DefaultColours) > 0 {
+		// Shared, not copied: opts is built once per server and read by
+		// concurrent requests, but these specs are only ever read here —
+		// resolveColours below allocates the slice that escapes into Params.
+		st.colours = opts.DefaultColours
+	}
 
 	if trimmed := strings.Trim(rawKey, "/"); trimmed != "" {
 		for _, seg := range strings.Split(trimmed, "/") {
@@ -209,11 +238,16 @@ func ParseWithOptions(rawKey string, opts Options) (Params, error) {
 				return Params{}, invalidParam(name, rawValue)
 			}
 
-			if err := applySegment(&p, name, values, opts.MaxWidth, opts.MaxHeight); err != nil {
+			if err := applySegment(&st, name, values, opts.MaxWidth, opts.MaxHeight); err != nil {
 				return Params{}, err
 			}
 		}
 	}
+
+	// Deferred until every segment has been seen: a seedless `random` draws
+	// on `size` and `text`, which may appear after `colour` in the key, or
+	// come from a configured default that never saw the key at all.
+	p.Colours = resolveColours(st.colours, p)
 
 	// A gradient needs two stops to interpolate between. A key that asked for
 	// one explicitly is told so rather than being handed a flat fill it did
@@ -261,9 +295,19 @@ func decodeValues(rawValue string) ([]string, error) {
 	return values, nil
 }
 
-// applySegment validates and applies a single decoded name/values pair to p.
+// parseState is the parameter set being built plus the information needed to
+// finish it once every segment has been seen. Segments may appear in any
+// order, so anything depending on another segment's value has to be recorded
+// here and resolved at the end.
+type parseState struct {
+	params  *Params
+	colours []ColourSpec // the configured default until a `colour` segment replaces it
+}
+
+// applySegment validates and applies a single decoded name/values pair.
 // Unrecognised segment names are ignored for forward compatibility.
-func applySegment(p *Params, name string, values []string, maxWidth, maxHeight int) error {
+func applySegment(st *parseState, name string, values []string, maxWidth, maxHeight int) error {
+	p := st.params
 	switch name {
 	case "type":
 		return applySingleValue(values, name, func(v string) error { return applyType(p, v) })
@@ -272,7 +316,7 @@ func applySegment(p *Params, name string, values []string, maxWidth, maxHeight i
 	case "size":
 		return applySingleValue(values, name, func(v string) error { return applySize(p, v, maxWidth, maxHeight) })
 	case "colour":
-		return applyColours(p, values)
+		return applyColours(st, values)
 	case "gradient":
 		return applySingleValue(values, name, func(v string) error { return applyGradient(p, v) })
 	case "text":
@@ -337,33 +381,51 @@ func ParseSize(v string, maxWidth, maxHeight int) (width, height int, ok bool) {
 	return w, h, true
 }
 
-func applyColours(p *Params, values []string) error {
-	cs, ok := ParseColours(values)
+// applyColours applies a `colour` list, replacing the configured default.
+// Members are left unresolved until the rest of the key has been parsed.
+func applyColours(st *parseState, values []string) error {
+	specs, ok := ParseColourSpecs(values)
 	if !ok {
 		return invalidParam("colour", strings.Join(values, ","))
 	}
-	p.Colours = cs
+	st.colours = specs
 	return nil
 }
 
-// ParseColours parses the `colour` value syntax — one to MaxColours values,
-// each a lowercase 6-digit hex value without a leading '#' or a CSS named
-// colour — reporting whether every value is recognised and the list is within
-// bounds. Callers outside key parsing (e.g. configuration) use it to accept
-// the same syntax.
-func ParseColours(values []string) ([]color.RGBA, bool) {
+// ParseColourSpecs parses the `colour` value syntax — one to MaxColours
+// values, each a lowercase 6-digit hex value without a leading '#', a CSS
+// named colour, or `random` with an optional `:{seed}` — reporting whether
+// every value is recognised and the list is within bounds. Random members are
+// returned unresolved; see ColourSpec. Callers outside key parsing (e.g.
+// configuration) use it to accept the same syntax.
+func ParseColourSpecs(values []string) ([]ColourSpec, bool) {
 	if len(values) == 0 || len(values) > MaxColours {
 		return nil, false
 	}
-	cs := make([]color.RGBA, len(values))
+	specs := make([]ColourSpec, len(values))
 	for i, v := range values {
-		c, ok := ParseColour(v)
+		s, ok := parseColourSpec(v)
 		if !ok {
 			return nil, false
 		}
-		cs[i] = c
+		specs[i] = s
 	}
-	return cs, true
+	return specs, true
+}
+
+// parseColourSpec parses a single `colour` list member.
+func parseColourSpec(v string) (ColourSpec, bool) {
+	if seed, isRandom, ok := parseRandomColour(v); isRandom {
+		if !ok {
+			return ColourSpec{}, false
+		}
+		return ColourSpec{Random: true, Seed: seed}, true
+	}
+	c, ok := ParseColour(v)
+	if !ok {
+		return ColourSpec{}, false
+	}
+	return FixedColour(c), true
 }
 
 // ParseColour parses a single `colour` list member — a lowercase 6-digit hex

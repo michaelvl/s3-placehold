@@ -51,8 +51,8 @@ func TestLoadZeroConfigDefault(t *testing.T) {
 	if cfg.DefaultWidth != key.DefaultWidth || cfg.DefaultHeight != key.DefaultHeight {
 		t.Errorf("DefaultWidth/Height = %dx%d, want %dx%d", cfg.DefaultWidth, cfg.DefaultHeight, key.DefaultWidth, key.DefaultHeight)
 	}
-	if !reflect.DeepEqual(cfg.DefaultColours, key.DefaultColours()) {
-		t.Errorf("DefaultColours = %+v, want %+v", cfg.DefaultColours, key.DefaultColours())
+	if !reflect.DeepEqual(cfg.DefaultColours, key.DefaultColourSpecs()) {
+		t.Errorf("DefaultColours = %+v, want %+v", cfg.DefaultColours, key.DefaultColourSpecs())
 	}
 	if cfg.DefaultGradient != (key.Gradient{}) {
 		t.Errorf("DefaultGradient = %+v, want zero value", cfg.DefaultGradient)
@@ -226,7 +226,7 @@ func TestLoadDefaultColour(t *testing.T) {
 	}
 
 	want := color.RGBA{R: 0xff, A: 0xff}
-	if !reflect.DeepEqual(cfg.DefaultColours, []color.RGBA{want}) {
+	if !reflect.DeepEqual(cfg.DefaultColours, []key.ColourSpec{key.FixedColour(want)}) {
 		t.Errorf("DefaultColours = %+v, want [%+v]", cfg.DefaultColours, want)
 	}
 }
@@ -240,13 +240,13 @@ func TestLoadDefaultColourNamed(t *testing.T) {
 	}
 
 	want := color.RGBA{R: 0xad, G: 0xd8, B: 0xe6, A: 0xff} // CSS lightblue
-	if !reflect.DeepEqual(cfg.DefaultColours, []color.RGBA{want}) {
+	if !reflect.DeepEqual(cfg.DefaultColours, []key.ColourSpec{key.FixedColour(want)}) {
 		t.Errorf("DefaultColours = %+v, want [%+v]", cfg.DefaultColours, want)
 	}
 }
 
 func TestLoadInvalidDefaultColour(t *testing.T) {
-	for _, v := range []string{"FF0000", "#ff0000", "notacolour", "ff00"} {
+	for _, v := range []string{"FF0000", "#ff0000", "notacolour", "ff00", "random:", "randomm"} {
 		t.Setenv("DEFAULT_COLOUR", v)
 		if _, err := Load(); err == nil {
 			t.Errorf("Load(DEFAULT_COLOUR=%s) = nil error, want error", v)
@@ -262,7 +262,10 @@ func TestLoadDefaultColourList(t *testing.T) {
 		t.Fatalf("Load returned error: %v", err)
 	}
 
-	want := []color.RGBA{{R: 0xff, A: 0xff}, {R: 0xad, G: 0xd8, B: 0xe6, A: 0xff}}
+	want := []key.ColourSpec{
+		key.FixedColour(color.RGBA{R: 0xff, A: 0xff}),
+		key.FixedColour(color.RGBA{R: 0xad, G: 0xd8, B: 0xe6, A: 0xff}),
+	}
 	if !reflect.DeepEqual(cfg.DefaultColours, want) {
 		t.Errorf("DefaultColours = %+v, want %+v", cfg.DefaultColours, want)
 	}
@@ -274,6 +277,39 @@ func TestLoadInvalidDefaultColourList(t *testing.T) {
 		if _, err := Load(); err == nil {
 			t.Errorf("Load with DEFAULT_COLOUR=%q = nil error, want error", v)
 		}
+	}
+}
+
+func TestLoadDefaultColourRandom(t *testing.T) {
+	// DEFAULT_COLOUR=random is carried through unresolved: it names a colour
+	// per request, so Load has nothing to resolve it against.
+	t.Setenv("DEFAULT_COLOUR", "random")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	want := []key.ColourSpec{{Random: true}}
+	if !reflect.DeepEqual(cfg.DefaultColours, want) {
+		t.Errorf("DefaultColours = %+v, want %+v", cfg.DefaultColours, want)
+	}
+}
+
+func TestLoadDefaultColourRandomSeededAndMixed(t *testing.T) {
+	t.Setenv("DEFAULT_COLOUR", "ff0000,random:brand")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	want := []key.ColourSpec{
+		key.FixedColour(color.RGBA{R: 0xff, A: 0xff}),
+		{Random: true, Seed: "brand"},
+	}
+	if !reflect.DeepEqual(cfg.DefaultColours, want) {
+		t.Errorf("DefaultColours = %+v, want %+v", cfg.DefaultColours, want)
 	}
 }
 
