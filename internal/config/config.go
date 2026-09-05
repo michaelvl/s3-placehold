@@ -37,6 +37,7 @@ type Config struct {
 	DefaultHeight   int
 	DefaultColours  []key.ColourSpec
 	DefaultGradient key.Gradient
+	DefaultGuides   []key.Guide
 	DefaultDelayMin time.Duration
 	DefaultDelayMax time.Duration
 }
@@ -105,6 +106,12 @@ func Load() (Config, error) {
 	}
 	cfg.DefaultGradient = defGradient
 
+	defGuides, err := parseDefaultGuides()
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.DefaultGuides = defGuides
+
 	delayMin, delayMax, err := parseDefaultDelay()
 	if err != nil {
 		return Config{}, err
@@ -167,6 +174,21 @@ func parseDefaultGradient() (key.Gradient, error) {
 		return key.Gradient{}, fmt.Errorf("invalid DEFAULT_GRADIENT %q: must be \"linear\" with an optional angle (\"linear:45\"), \"radial\", \"mesh\" or \"none\"", raw)
 	}
 	return g, nil
+}
+
+// parseDefaultGuides parses DEFAULT_GUIDES, the alignment overlay drawn on
+// requests whose key carries no `guides` segment. It accepts the same syntax
+// as that segment, and yields no overlay when unset.
+func parseDefaultGuides() ([]key.Guide, error) {
+	raw := os.Getenv("DEFAULT_GUIDES")
+	if raw == "" {
+		return nil, nil
+	}
+	gs, ok := key.ParseGuides(strings.Split(raw, ","))
+	if !ok {
+		return nil, fmt.Errorf("invalid DEFAULT_GUIDES %q: must be a comma-separated list of \"cross\", \"frame\", \"corners\" and \"thirds\", or \"all\" or \"none\" on their own", raw)
+	}
+	return gs, nil
 }
 
 // parseDefaultDelay parses DEFAULT_DELAY_MS, the delay applied to requests

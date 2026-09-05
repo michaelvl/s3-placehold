@@ -244,3 +244,113 @@ func TestContrastColourAutoAdjusts(t *testing.T) {
 		t.Errorf("contrastColour(black) = %+v, want white", lightText)
 	}
 }
+
+func TestSynthesizeSVGGuides(t *testing.T) {
+	s := New()
+	params := key.Default()
+	params.Width = 400
+	params.Height = 300
+	params.Guides = key.AllGuides()
+
+	data, _, err := s.Synthesize(params)
+	if err != nil {
+		t.Fatalf("Synthesize returned error: %v", err)
+	}
+
+	svg := string(data)
+	// Four arrowheads, one per end of the cross.
+	if got := strings.Count(svg, "<polygon"); got != 4 {
+		t.Errorf("polygon count = %d, want 4 (one arrowhead per cross end): %s", got, svg)
+	}
+	// The guide group is painted in the contrasting colour, like the text.
+	if !strings.Contains(svg, `<g fill="#000000">`) {
+		t.Errorf("svg missing guide group in the contrasting colour: %s", svg)
+	}
+	// An arrowhead tip touching each border is what makes a crop visible.
+	for _, tip := range []string{`0,150`, `400,150`, `200,0`, `200,300`} {
+		if !strings.Contains(svg, tip) {
+			t.Errorf("svg missing arrowhead tip at %s: %s", tip, svg)
+		}
+	}
+}
+
+func TestSynthesizeSVGNoGuidesByDefault(t *testing.T) {
+	data, _, err := New().Synthesize(key.Default())
+	if err != nil {
+		t.Fatalf("Synthesize returned error: %v", err)
+	}
+	if strings.Contains(string(data), "<polygon") || strings.Contains(string(data), "<g fill=") {
+		t.Errorf("svg has a guide overlay without a guides segment: %s", data)
+	}
+}
+
+func TestSynthesizePNGGuidesDrawInsideTheImage(t *testing.T) {
+	s := New()
+	params := key.Default()
+	params.Format = "png"
+	params.Width = 400
+	params.Height = 300
+	params.Guides = []key.Guide{key.GuideCross, key.GuideFrame}
+
+	data, _, err := s.Synthesize(params)
+	if err != nil {
+		t.Fatalf("Synthesize returned error: %v", err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("failed to decode PNG: %v", err)
+	}
+
+	bg := params.BaseColour()
+	guide := contrastColour(bg)
+	// Every guide pixel is inside the image, so cropping removes part of the
+	// overlay: the frame's own corner, and each of the four arrow tips.
+	for _, p := range []stdimage.Point{
+		{X: 0, Y: 0},     // frame corner
+		{X: 399, Y: 299}, // opposite frame corner
+		{X: 0, Y: 150},   // left arrow tip
+		{X: 399, Y: 150}, // right arrow tip
+		{X: 200, Y: 0},   // top arrow tip
+		{X: 200, Y: 299}, // bottom arrow tip
+		{X: 200, Y: 150}, // centre, where the two lines meet
+	} {
+		r, g, b, _ := img.At(p.X, p.Y).RGBA()
+		if uint8(r>>8) != guide.R || uint8(g>>8) != guide.G || uint8(b>>8) != guide.B {
+			t.Errorf("pixel at %v = (%d,%d,%d), want guide colour (%d,%d,%d)",
+				p, r>>8, g>>8, b>>8, guide.R, guide.G, guide.B)
+		}
+	}
+	// A point well away from any guide keeps the background.
+	r, g, b, _ := img.At(60, 60).RGBA()
+	if uint8(r>>8) != bg.R || uint8(g>>8) != bg.G || uint8(b>>8) != bg.B {
+		t.Errorf("pixel away from the guides = (%d,%d,%d), want background", r>>8, g>>8, b>>8)
+	}
+}
+
+func TestGuideGeometryStaysInBounds(t *testing.T) {
+	// Guides are only useful for judging a crop if none of them is already
+	// outside the image. Includes sizes small enough for the clamped minimum
+	// arm and arrowhead to be a large fraction of the image.
+	for _, size := range [][2]int{{1, 1}, {3, 7}, {100, 100}, {400, 300}, {2000, 40}} {
+		w, h := size[0], size[1]
+		spec := guideGeometry(w, h, key.AllGuides())
+		for _, r := range spec.rects {
+			if r.x < 0 || r.y < 0 || r.x+r.w > w || r.y+r.h > h {
+				t.Errorf("size %dx%d: rect %+v escapes the image", w, h, r)
+			}
+		}
+		for _, tri := range spec.tris {
+			for _, p := range tri.pts {
+				if p[0] < 0 || p[1] < 0 || p[0] > float64(w) || p[1] > float64(h) {
+					t.Errorf("size %dx%d: triangle point %v escapes the image", w, h, p)
+				}
+			}
+		}
+	}
+}
+
+func TestGuideGeometryEmptyWithoutGuides(t *testing.T) {
+	if !guideGeometry(100, 100, nil).empty() {
+		t.Errorf("guideGeometry with no guides = non-empty, want empty")
+	}
+}

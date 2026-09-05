@@ -41,6 +41,9 @@ curl http://localhost:9000/images/
 # Text overlay ("+" is a space)
 curl http://localhost:9000/images/format=png/size=400x200/text=hello+world -o out.png
 
+# Alignment guides, to see how a layout crops or scales the image
+curl http://localhost:9000/images/format=png/size=400x300/guides=cross,frame -o out.png
+
 # Simulated latency: fixed 200ms, or a random 100-500ms
 curl http://localhost:9000/images/delay=200
 curl http://localhost:9000/images/delay=100,500
@@ -106,6 +109,7 @@ order, all optional:
 | `size`   | `{width}x{height}`, e.g. `200x300`                                       | `DEFAULT_SIZE` (`100x100`) | Pixels. Non-integer or non-positive → 400.                            |
 | `colour` | Up to 8 comma-separated values, each lowercase hex without `#` (`ff0000`), a CSS named colour (`lightblue`), or `random` / `random:{seed}` | `DEFAULT_COLOUR` (`cccccc`) | Background fill. Two or more colours are painted as a gradient. Unrecognised value, or more than 8 → 400. |
 | `gradient` | `linear` with an optional angle (`linear:45`) \| `radial` \| `mesh` \| `none` | `DEFAULT_GRADIENT`, else `linear:90` for multi-colour keys and `none` otherwise | Geometry the `colour` list is painted with. Needs two or more colours — anything but `none` with a single colour → 400. Other values → 400. |
+| `guides` | Comma-separated list of `cross`, `frame`, `corners`, `thirds`, or `all` / `none` on their own | `DEFAULT_GUIDES` (none) | Alignment overlay drawn inside the image. Unrecognised name, or `all`/`none` in a list → 400. |
 | `text`   | URL-encoded string, `+` = space                                          | _(none)_  | Overlaid on the image; colour auto-contrasts against the background.             |
 | `delay`  | Fixed ms (`200`) or an inclusive random range (`100,500`)                | `DEFAULT_DELAY_MS` | Server sleeps before responding, to simulate slow storage. Defaults to no delay unless `DEFAULT_DELAY_MS` is set; an explicit `delay` (including `delay=0`) overrides it. |
 
@@ -190,6 +194,43 @@ the image. SVG output stays a few hundred bytes whatever the requested `size`,
 since it is emitted as gradient definitions rather than pixels; PNG output of a
 smooth gradient compresses well for the same reason.
 
+### Guides
+
+`guides` overlays alignment marks on the image, in the same auto-contrasting
+colour as `text`. They're for judging how a placeholder is being *displayed* —
+whether your layout crops it, letterboxes it, or scales it off-centre:
+
+- `cross` — a horizontal and a vertical line through the centre, each ending in
+  an arrowhead whose tip touches the border. The arrowheads are the point: a
+  line running off an edge looks the same cropped or not, a missing tip does not.
+  Off-centre placement shows up as the two lines meeting somewhere other than
+  the middle of the visible box.
+- `frame` — a hairline along all four edges. Any crop eats a whole side.
+- `corners` — heavier L-shaped crop marks flush with each corner, like a print
+  reference. Survives a crop that only nibbles an edge, so it tells you *how
+  much* was lost.
+- `thirds` — a rule-of-thirds grid, for judging composition against the visible
+  box.
+- `all` — all four. `none` — no overlay, useful to override a configured
+  `DEFAULT_GUIDES`, in the same way `gradient=none` overrides `DEFAULT_GRADIENT`.
+
+```sh
+curl http://localhost:9000/images/format=png/size=400x300/guides=cross -o out.png
+curl http://localhost:9000/images/size=400x300/guides=cross,frame
+curl http://localhost:9000/images/size=400x300/guides=all/text=hero
+```
+
+Names combine in any order and duplicates collapse, so `guides=frame,cross` and
+`guides=cross,frame,cross` render the same image. `all` and `none` describe the
+whole list, so they're only accepted on their own — `guides=none,cross` is a 400
+rather than a guess at what you meant.
+
+Everything is drawn **inside** the image bounds, never bleeding outside it —
+that is what makes a crop visible in the result itself. Line weight and mark
+size scale with the image's shorter side, so a 100x100 thumbnail and a 4000px
+render look like the same reference. Guides are drawn under `text`, so a `text`
+label stays readable with the cross running behind it.
+
 ## Configuration
 
 All configuration is via environment variables:
@@ -205,6 +246,7 @@ All configuration is via environment variables:
 | `DEFAULT_SIZE`          | Size for keys with no `size` segment, as `{width}x{height}` | `100x100`       |
 | `DEFAULT_COLOUR`        | Background fill for keys with no `colour` segment: up to 8 comma-separated hex values, CSS colour names, or `random` / `random:{seed}` | `cccccc` |
 | `DEFAULT_GRADIENT`      | Gradient geometry for keys with no `gradient` segment: `linear[:deg]`, `radial`, `mesh` or `none` | _(none)_ |
+| `DEFAULT_GUIDES`        | Alignment overlay for keys with no `guides` segment: a comma-separated list of `cross`, `frame`, `corners`, `thirds`, or `all` / `none` | _(none)_ |
 | `DEFAULT_DELAY_MS`      | Delay for keys with no `delay` segment: fixed ms (`200`) or a range (`100,500`) | `0` (no delay) |
 
 ## Key limitations vs. real AWS S3

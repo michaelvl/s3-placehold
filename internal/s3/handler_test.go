@@ -641,3 +641,49 @@ func TestGetObjectInvalidGradientReturns400(t *testing.T) {
 		}
 	}
 }
+
+func TestGetObjectDefaultGuidesFromConfig(t *testing.T) {
+	cfg := config.Config{
+		Port:          9000,
+		Buckets:       []config.BucketConfig{{Name: "placeholder", Mode: config.ModePublic}},
+		MaxWidth:      key.DefaultMaxWidth,
+		MaxHeight:     key.DefaultMaxHeight,
+		DefaultGuides: []key.Guide{key.GuideCross},
+	}
+	h := NewHandler(cfg, synth.NewRouter(image.New()))
+
+	cases := map[string]bool{
+		"/placeholder/size=200x100":              true,  // configured default applies
+		"/placeholder/size=200x100/guides=none":  false, // explicit none overrides it
+		"/placeholder/size=200x100/guides=frame": false, // so does another overlay: no cross, no arrowheads
+	}
+	for target, wantArrowheads := range cases {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req.Host = "localhost"
+		rec := httptest.NewRecorder()
+
+		h.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d, want %d", target, rec.Code, http.StatusOK)
+		}
+		if got := strings.Contains(rec.Body.String(), "<polygon"); got != wantArrowheads {
+			t.Errorf("GET %s: arrowheads present = %v, want %v: %s", target, got, wantArrowheads, rec.Body.String())
+		}
+	}
+}
+
+func TestGetObjectInvalidGuidesReturns400(t *testing.T) {
+	h := testHandler()
+	for _, v := range []string{"grid", "cross,grid", "none,cross"} {
+		req := httptest.NewRequest(http.MethodGet, "/placeholder/guides="+v, nil)
+		req.Host = "localhost"
+		rec := httptest.NewRecorder()
+
+		h.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("GET guides=%s: status = %d, want %d", v, rec.Code, http.StatusBadRequest)
+		}
+	}
+}

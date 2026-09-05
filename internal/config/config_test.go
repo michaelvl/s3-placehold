@@ -3,6 +3,7 @@ package config
 import (
 	"image/color"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,7 @@ func TestLoadZeroConfigDefault(t *testing.T) {
 	t.Setenv("DEFAULT_SIZE", "")
 	t.Setenv("DEFAULT_COLOUR", "")
 	t.Setenv("DEFAULT_GRADIENT", "")
+	t.Setenv("DEFAULT_GUIDES", "")
 
 	cfg, err := Load()
 	if err != nil {
@@ -56,6 +58,9 @@ func TestLoadZeroConfigDefault(t *testing.T) {
 	}
 	if cfg.DefaultGradient != (key.Gradient{}) {
 		t.Errorf("DefaultGradient = %+v, want zero value", cfg.DefaultGradient)
+	}
+	if len(cfg.DefaultGuides) != 0 {
+		t.Errorf("DefaultGuides = %v, want none", cfg.DefaultGuides)
 	}
 }
 
@@ -332,6 +337,29 @@ func TestLoadInvalidDefaultGradient(t *testing.T) {
 		t.Setenv("DEFAULT_GRADIENT", v)
 		if _, err := Load(); err == nil {
 			t.Errorf("Load with DEFAULT_GRADIENT=%q = nil error, want error", v)
+		}
+	}
+}
+
+func TestLoadDefaultGuides(t *testing.T) {
+	t.Setenv("DEFAULT_GUIDES", "cross,frame")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	want := []key.Guide{key.GuideFrame, key.GuideCross}
+	if !slices.Equal(cfg.DefaultGuides, want) {
+		t.Errorf("DefaultGuides = %v, want %v", cfg.DefaultGuides, want)
+	}
+}
+
+func TestLoadInvalidDefaultGuides(t *testing.T) {
+	for _, v := range []string{"grid", "cross,grid", "none,cross"} {
+		t.Setenv("DEFAULT_GUIDES", v)
+		if _, err := Load(); err == nil {
+			t.Errorf("Load with DEFAULT_GUIDES=%q = nil error, want error", v)
 		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image/color"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -654,5 +655,70 @@ func TestParseConfiguredGradientDegradesQuietly(t *testing.T) {
 	}
 	if got.Gradient != (Gradient{Kind: GradientNone}) {
 		t.Errorf("Gradient = %+v, want none", got.Gradient)
+	}
+}
+
+func TestParseGuides(t *testing.T) {
+	cases := map[string][]Guide{
+		"cross":               {GuideCross},
+		"frame":               {GuideFrame},
+		"corners":             {GuideCorners},
+		"thirds":              {GuideThirds},
+		"cross,frame":         {GuideFrame, GuideCross},
+		"frame,cross":         {GuideFrame, GuideCross}, // canonical order, not written order
+		"cross,cross":         {GuideCross},             // duplicates collapse
+		"all":                 {GuideThirds, GuideFrame, GuideCorners, GuideCross},
+		"none":                {},
+		"cross,corners,frame": {GuideFrame, GuideCorners, GuideCross},
+	}
+	for v, want := range cases {
+		got, err := Parse("/guides=" + v)
+		if err != nil {
+			t.Fatalf("Parse(guides=%s) returned error: %v", v, err)
+		}
+		if !slices.Equal(got.Guides, want) {
+			t.Errorf("Parse(guides=%s).Guides = %v, want %v", v, got.Guides, want)
+		}
+	}
+}
+
+func TestParseGuidesInvalid(t *testing.T) {
+	// `all` and `none` say something about the whole list, so they are only
+	// meaningful on their own.
+	for _, v := range []string{"", "grid", "cross,grid", "none,cross", "cross,all", "Cross", "cross:ff0000"} {
+		if _, err := Parse("/guides=" + v); err == nil {
+			t.Errorf("Parse(guides=%s) = nil error, want error", v)
+		}
+	}
+}
+
+func TestParseNoGuidesByDefault(t *testing.T) {
+	got, err := Parse("/size=100x100")
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	if len(got.Guides) != 0 {
+		t.Errorf("Guides = %v, want none", got.Guides)
+	}
+}
+
+func TestParseWithOptionsDefaultGuides(t *testing.T) {
+	opts := DefaultOptions()
+	opts.DefaultGuides = []Guide{GuideFrame}
+
+	cases := map[string][]Guide{
+		"/size=100x100":       {GuideFrame}, // configured default applies
+		"/guides=cross":       {GuideCross}, // segment overrides it
+		"/guides=none":        {},           // explicit none overrides it too
+		"/guides=frame,cross": {GuideFrame, GuideCross},
+	}
+	for raw, want := range cases {
+		got, err := ParseWithOptions(raw, opts)
+		if err != nil {
+			t.Fatalf("ParseWithOptions(%q) returned error: %v", raw, err)
+		}
+		if !slices.Equal(got.Guides, want) {
+			t.Errorf("ParseWithOptions(%q).Guides = %v, want %v", raw, got.Guides, want)
+		}
 	}
 }

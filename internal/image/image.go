@@ -124,6 +124,7 @@ const (
 func renderSVG(params key.Params) []byte {
 	cs := colours(params)
 	spec := gradientGeometry(params.Width, params.Height, cs, params.Gradient)
+	overlay := contrastColour(averageColour(cs))
 
 	var b strings.Builder
 	// The viewBox is what keeps a userSpaceOnUse gradient attached to the box
@@ -131,13 +132,35 @@ func renderSVG(params key.Params) []byte {
 	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">`,
 		params.Width, params.Height, params.Width, params.Height)
 	writeBackground(&b, spec)
+	writeGuides(&b, guideGeometry(params.Width, params.Height, params.Guides), overlay)
+	// Text last, so the centre cross does not run through the label that names
+	// the image.
 	if params.Text != "" {
 		size := fitFontSize(params.Width, params.Height, params.Text)
 		fmt.Fprintf(&b, `<text x="50%%" y="50%%" fill="%s" font-size="%.1f" text-anchor="middle" dominant-baseline="middle">%s</text>`,
-			colourHex(contrastColour(averageColour(cs))), size, xmlEscapeText(params.Text))
+			colourHex(overlay), size, xmlEscapeText(params.Text))
 	}
 	b.WriteString(`</svg>`)
 	return []byte(b.String())
+}
+
+// writeGuides emits the guide overlay as one filled group: rects for the
+// bands, polygons for the arrowheads.
+func writeGuides(b *strings.Builder, spec guideSpec, c color.RGBA) {
+	if spec.empty() {
+		return
+	}
+	fmt.Fprintf(b, `<g fill="%s">`, colourHex(c))
+	for _, r := range spec.rects {
+		fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d"/>`, r.x, r.y, r.w, r.h)
+	}
+	for _, t := range spec.tris {
+		fmt.Fprintf(b, `<polygon points="%s,%s %s,%s %s,%s"/>`,
+			svgNum(t.pts[0][0]), svgNum(t.pts[0][1]),
+			svgNum(t.pts[1][0]), svgNum(t.pts[1][1]),
+			svgNum(t.pts[2][0]), svgNum(t.pts[2][1]))
+	}
+	b.WriteString(`</g>`)
 }
 
 // writeBackground emits the fill described by spec: a plain rect for a flat
@@ -202,8 +225,11 @@ func renderRaster(params key.Params) *stdimage.RGBA {
 		fillGradient(img, spec)
 	}
 
+	overlay := contrastColour(averageColour(cs))
+	drawGuides(img, guideGeometry(params.Width, params.Height, params.Guides), overlay)
+	// Text last, matching renderSVG's paint order.
 	if params.Text != "" {
-		drawText(img, params, contrastColour(averageColour(cs)))
+		drawText(img, params, overlay)
 	}
 	return img
 }

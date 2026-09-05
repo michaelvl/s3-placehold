@@ -38,6 +38,25 @@ type Gradient struct {
 // IsSet reports whether the gradient geometry has been specified.
 func (g Gradient) IsSet() bool { return g.Kind != "" }
 
+// Guide is a single alignment overlay selected by the `guides` segment. The
+// overlays are drawn entirely inside the image, so that cropping or scaling
+// the result is visible in the result itself.
+type Guide string
+
+// The overlays a `guides` segment can select.
+const (
+	GuideThirds  Guide = "thirds"
+	GuideFrame   Guide = "frame"
+	GuideCorners Guide = "corners"
+	GuideCross   Guide = "cross"
+)
+
+// guideOrder is every Guide in the order they are drawn, which is also the
+// canonical order ParseGuides returns them in: a `guides` list renders the
+// same picture whatever order it was written in. Broad, faint overlays come
+// first so the centre cross ends up on top.
+var guideOrder = []Guide{GuideThirds, GuideFrame, GuideCorners, GuideCross}
+
 // Params holds the parsed and validated parameters for a synthesis request.
 type Params struct {
 	Type     string
@@ -46,6 +65,7 @@ type Params struct {
 	Height   int
 	Colours  []color.RGBA // at least one; Colours[0] is the base colour
 	Gradient Gradient
+	Guides   []Guide // in guideOrder; empty means no overlay
 	Text     string
 	DelayMin time.Duration
 	DelayMax time.Duration
@@ -119,12 +139,13 @@ func DefaultColourSpecs() []ColourSpec {
 }
 
 // Options carries server configuration into key parsing: the size caps a
-// `size` segment is checked against, and the size, colours, gradient and delay
-// applied to keys that carry no `size` / `colour` / `gradient` / `delay`
-// segment. A zero DefaultWidth or DefaultHeight means the built-in
-// DefaultWidth/DefaultHeight, an empty DefaultColours means
+// `size` segment is checked against, and the size, colours, gradient, guides
+// and delay applied to keys that carry no `size` / `colour` / `gradient` /
+// `guides` / `delay` segment. A zero DefaultWidth or DefaultHeight means the
+// built-in DefaultWidth/DefaultHeight, an empty DefaultColours means
 // DefaultColourSpecs(), an unset DefaultGradient means the geometry is chosen
-// from the number of colours, and a zero delay means no delay.
+// from the number of colours, an empty DefaultGuides means no overlay, and a
+// zero delay means no delay.
 //
 // DefaultColours holds unresolved specs rather than colours so that a
 // configured default can be `random`: it is resolved per request, against that
@@ -136,6 +157,7 @@ type Options struct {
 	DefaultHeight   int
 	DefaultColours  []ColourSpec
 	DefaultGradient Gradient
+	DefaultGuides   []Guide
 	DefaultDelayMin time.Duration
 	DefaultDelayMax time.Duration
 }
@@ -207,6 +229,10 @@ func ParseWithOptions(rawKey string, opts Options) (Params, error) {
 	if opts.DefaultWidth > 0 && opts.DefaultHeight > 0 {
 		p.Width, p.Height = opts.DefaultWidth, opts.DefaultHeight
 	}
+	// Shared, not copied: opts is built once per server and read by concurrent
+	// requests, and neither Params.Guides nor its backing array is ever written
+	// after parsing. A `guides` segment replaces the slice rather than editing it.
+	p.Guides = opts.DefaultGuides
 	p.DelayMin, p.DelayMax = opts.DefaultDelayMin, opts.DefaultDelayMax
 
 	st := parseState{params: &p, colours: DefaultColourSpecs()}
@@ -319,6 +345,8 @@ func applySegment(st *parseState, name string, values []string, maxWidth, maxHei
 		return applyColours(st, values)
 	case "gradient":
 		return applySingleValue(values, name, func(v string) error { return applyGradient(p, v) })
+	case "guides":
+		return applyGuides(p, values)
 	case "text":
 		p.Text = strings.Join(values, ",")
 	case "delay":
@@ -493,6 +521,64 @@ func ParseGradient(v string) (Gradient, bool) {
 		return Gradient{}, false
 	}
 	return Gradient{Kind: kind, Angle: ((a % 360) + 360) % 360}, true
+}
+
+func applyGuides(p *Params, values []string) error {
+	gs, ok := ParseGuides(values)
+	if !ok {
+		return invalidParam("guides", strings.Join(values, ","))
+	}
+	p.Guides = gs
+	return nil
+}
+
+// AllGuides returns every Guide, in drawing order. It is what the `guides`
+// value `all` expands to.
+func AllGuides() []Guide {
+	return append([]Guide(nil), guideOrder...)
+}
+
+// ParseGuides parses the `guides` value syntax — a comma-separated list of
+// overlay names (`cross`, `frame`, `corners`, `thirds`), or the shorthands
+// `all` and `none`, which must stand alone — reporting whether every value is
+// recognised. Duplicates collapse, and the result is in guideOrder, so a list
+// renders the same picture however it was written. `none` yields an empty
+// list. Callers outside key parsing (e.g. configuration) use it to accept the
+// same syntax.
+func ParseGuides(values []string) ([]Guide, bool) {
+	if len(values) == 0 {
+		return nil, false
+	}
+	if len(values) == 1 {
+		// Shorthands, rejected below in a longer list: `none` alongside an
+		// overlay contradicts itself, and `all` alongside one says nothing the
+		// bare shorthand does not.
+		switch values[0] {
+		case "none":
+			return nil, true
+		case "all":
+			return AllGuides(), true
+		}
+	}
+
+	selected := make(map[Guide]bool, len(values))
+	for _, v := range values {
+		g := Guide(v)
+		switch g {
+		case GuideThirds, GuideFrame, GuideCorners, GuideCross:
+			selected[g] = true
+		default:
+			return nil, false
+		}
+	}
+
+	gs := make([]Guide, 0, len(selected))
+	for _, g := range guideOrder {
+		if selected[g] {
+			gs = append(gs, g)
+		}
+	}
+	return gs, true
 }
 
 func applyDelay(p *Params, values []string) error {
