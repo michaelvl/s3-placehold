@@ -16,6 +16,11 @@ build:
 test:
 	go test ./...
 
+# Regenerates examples/ by running the curl commands shown in README's gallery.
+.PHONY: examples
+examples:
+	./hack/gen-examples.sh
+
 .PHONY: lint
 lint:
 	golangci-lint run

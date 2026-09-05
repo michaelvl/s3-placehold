@@ -102,16 +102,16 @@ order, all optional:
 /colour=ff0000,00ff00,0000ff/gradient=mesh
 ```
 
-| Segment  | Value syntax                                                             | Default   | Notes                                                                            |
-| -------- | ------------------------------------------------------------------------ | --------- | -------------------------------------------------------------------------------- |
-| `type`   | `image`                                                                  | `image`   | Routes to a synthesis pipeline. Only `image` exists today; unknown values → 400. |
-| `format` | `svg` \| `png` \| `jpeg`                                                 | `svg`     | Output format and `Content-Type`. Other values → 400.                            |
-| `size`   | `{width}x{height}`, e.g. `200x300`                                       | `DEFAULT_SIZE` (`100x100`) | Pixels. Non-integer or non-positive → 400.                            |
-| `colour` | Up to 8 comma-separated values, each lowercase hex without `#` (`ff0000`), a CSS named colour (`lightblue`), or `random` / `random:{seed}` | `DEFAULT_COLOUR` (`cccccc`) | Background fill. Two or more colours are painted as a gradient. Unrecognised value, or more than 8 → 400. |
-| `gradient` | `linear` with an optional angle (`linear:45`) \| `radial` \| `mesh` \| `none` | `DEFAULT_GRADIENT`, else `linear:90` for multi-colour keys and `none` otherwise | Geometry the `colour` list is painted with. Needs two or more colours — anything but `none` with a single colour → 400. Other values → 400. |
-| `guides` | Comma-separated list of `cross`, `frame`, `corners`, `thirds`, or `all` / `none` on their own | `DEFAULT_GUIDES` (none) | Alignment overlay drawn inside the image. Unrecognised name, or `all`/`none` in a list → 400. |
-| `text`   | URL-encoded string, `+` = space                                          | _(none)_  | Overlaid on the image; colour auto-contrasts against the background.             |
-| `delay`  | Fixed ms (`200`) or an inclusive random range (`100,500`)                | `DEFAULT_DELAY_MS` | Server sleeps before responding, to simulate slow storage. Defaults to no delay unless `DEFAULT_DELAY_MS` is set; an explicit `delay` (including `delay=0`) overrides it. |
+| Segment    | Value syntax                                                                                                                               | Default                                                                         | Notes                                                                                                                                                                     |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`     | `image`                                                                                                                                    | `image`                                                                         | Routes to a synthesis pipeline. Only `image` exists today; unknown values → 400.                                                                                          |
+| `format`   | `svg` \| `png` \| `jpeg`                                                                                                                   | `svg`                                                                           | Output format and `Content-Type`. Other values → 400.                                                                                                                     |
+| `size`     | `{width}x{height}`, e.g. `200x300`                                                                                                         | `DEFAULT_SIZE` (`100x100`)                                                      | Pixels. Non-integer or non-positive → 400.                                                                                                                                |
+| `colour`   | Up to 8 comma-separated values, each lowercase hex without `#` (`ff0000`), a CSS named colour (`lightblue`), or `random` / `random:{seed}` | `DEFAULT_COLOUR` (`cccccc`)                                                     | Background fill. Two or more colours are painted as a gradient. Unrecognised value, or more than 8 → 400.                                                                 |
+| `gradient` | `linear` with an optional angle (`linear:45`) \| `radial` \| `mesh` \| `none`                                                              | `DEFAULT_GRADIENT`, else `linear:90` for multi-colour keys and `none` otherwise | Geometry the `colour` list is painted with. Needs two or more colours — anything but `none` with a single colour → 400. Other values → 400.                               |
+| `guides`   | Comma-separated list of `cross`, `frame`, `corners`, `thirds`, or `all` / `none` on their own                                              | `DEFAULT_GUIDES` (none)                                                         | Alignment overlay drawn inside the image. Unrecognised name, or `all`/`none` in a list → 400.                                                                             |
+| `text`     | URL-encoded string, `+` = space                                                                                                            | _(none)_                                                                        | Overlaid on the image; colour auto-contrasts against the background.                                                                                                      |
+| `delay`    | Fixed ms (`200`) or an inclusive random range (`100,500`)                                                                                  | `DEFAULT_DELAY_MS`                                                              | Server sleeps before responding, to simulate slow storage. Defaults to no delay unless `DEFAULT_DELAY_MS` is set; an explicit `delay` (including `delay=0`) overrides it. |
 
 ### Random colours
 
@@ -119,16 +119,16 @@ Any `colour` list member can be `random`, which picks a stable colour rather
 than a different one per request — the same key always renders the same image:
 
 ```
-/text=alice/colour=random              # a colour derived from this key
+/text=maria/colour=random              # a colour derived from this key
 /colour=random:avatar42                # a colour derived from "avatar42"
 /colour=random,random/gradient=mesh    # a random multi-colour mesh
 /colour=ff0000,random                  # mix fixed and random
 ```
 
 `random:{seed}` hashes the seed you give it and nothing else, so the colour is
-pinned no matter what else the key contains. Bare `random` hashes the `size`
-and `text` of the request, plus the member's position in the `colour` list.
-That means:
+pinned no matter what else the key contains. Bare `random` hashes the `size` and
+`text` of the request, plus the member's position in the `colour` list. That
+means:
 
 - `format` and `delay` are **not** part of the seed, so asking for the same
   image as PNG instead of SVG keeps its colour.
@@ -140,18 +140,18 @@ That means:
 
 Colours vary in hue at a fixed saturation and lightness, so every result is
 vivid rather than muddy. The hash, that mapping and the seed construction are
-fixed: they define which colour a seed produces, and changing them would
-repaint every existing `colour=random` URL.
+fixed: they define which colour a seed produces, and changing them would repaint
+every existing `colour=random` URL.
 
 `DEFAULT_COLOUR` accepts `random` too, and is resolved per request rather than
-once at startup — so `DEFAULT_COLOUR=random` gives *every distinct key* its own
+once at startup — so `DEFAULT_COLOUR=random` gives _every distinct key_ its own
 stable colour without any key having to ask, and `DEFAULT_COLOUR=random,random`
 does the same with a gradient.
 
 A seed collapses that back to a single colour. `random:{seed}` ignores the
 request by definition, so as a server-wide default it renders the same colour
 for every key — `DEFAULT_COLOUR=random:staging` behaves exactly as if you had
-written that colour's hex. The point is to *name* a colour rather than choose
+written that colour's hex. The point is to _name_ a colour rather than choose
 one: two deployments set `random:staging` and `random:prod` and get two
 distinct, vivid colours without anyone picking hex values or checking they are
 far enough apart. The trade is that you cannot tell what colour a seed gives
@@ -165,9 +165,9 @@ left-to-right linear ramp. `gradient` selects the geometry:
 - `linear:{deg}` — a straight ramp. The angle follows the CSS `linear-gradient`
   convention: `0` points towards the top and increases clockwise, so `90` is
   left-to-right. Angles outside `[0,360)` are wrapped.
-- `radial` — a circle centred on the image, sized so the last colour reaches
-  the corners. Note this is a circle, not the ellipse CSS `radial-gradient`
-  defaults to, so on a very wide image the last colour only shows near the corners.
+- `radial` — a circle centred on the image, sized so the last colour reaches the
+  corners. Note this is a circle, not the ellipse CSS `radial-gradient` defaults
+  to, so on a very wide image the last colour only shows near the corners.
 - `mesh` — the first colour fills the background and each remaining colour is a
   soft blob at a fixed position, giving colour that varies across both axes.
   Blob positions are fixed, not random, so a key always renders the same image.
@@ -186,8 +186,8 @@ of asking for one are treated differently:
   `/colour=lightblue/gradient=radial` is a mistake worth reporting, not a
   request for a flat fill. Add a second colour (`colour=lightblue,steelblue`),
   or ask for `gradient=none`.
-- A key with a single colour under a configured `DEFAULT_GRADIENT` simply
-  paints flat. That key requested no gradient, so there is nothing to report.
+- A key with a single colour under a configured `DEFAULT_GRADIENT` simply paints
+  flat. That key requested no gradient, so there is nothing to report.
 
 All three formats render the same picture: `format` selects the encoding, not
 the image. SVG output stays a few hundred bytes whatever the requested `size`,
@@ -197,22 +197,23 @@ smooth gradient compresses well for the same reason.
 ### Guides
 
 `guides` overlays alignment marks on the image, in the same auto-contrasting
-colour as `text`. They're for judging how a placeholder is being *displayed* —
+colour as `text`. They're for judging how a placeholder is being _displayed_ —
 whether your layout crops it, letterboxes it, or scales it off-centre:
 
 - `cross` — a horizontal and a vertical line through the centre, each ending in
   an arrowhead whose tip touches the border. The arrowheads are the point: a
-  line running off an edge looks the same cropped or not, a missing tip does not.
-  Off-centre placement shows up as the two lines meeting somewhere other than
-  the middle of the visible box.
+  line running off an edge looks the same cropped or not, a missing tip does
+  not. Off-centre placement shows up as the two lines meeting somewhere other
+  than the middle of the visible box.
 - `frame` — a hairline along all four edges. Any crop eats a whole side.
 - `corners` — heavier L-shaped crop marks flush with each corner, like a print
-  reference. Survives a crop that only nibbles an edge, so it tells you *how
-  much* was lost.
+  reference. Survives a crop that only nibbles an edge, so it tells you _how
+  much_ was lost.
 - `thirds` — a rule-of-thirds grid, for judging composition against the visible
   box.
 - `all` — all four. `none` — no overlay, useful to override a configured
-  `DEFAULT_GUIDES`, in the same way `gradient=none` overrides `DEFAULT_GRADIENT`.
+  `DEFAULT_GUIDES`, in the same way `gradient=none` overrides
+  `DEFAULT_GRADIENT`.
 
 ```sh
 curl http://localhost:9000/images/format=png/size=400x300/guides=cross -o out.png
@@ -235,19 +236,19 @@ label stays readable with the cross running behind it.
 
 All configuration is via environment variables:
 
-| Variable                | Purpose                                                | Default              |
-| ----------------------- | ------------------------------------------------------ | -------------------- |
-| `PORT`                  | Listening port                                         | `9000`               |
-| `BUCKETS`               | Comma-separated `name:mode` pairs (`public`/`private`) | `placeholder:public` |
-| `AWS_ACCESS_KEY_ID`     | SigV4 access key (required if any bucket is `private`) | _(none)_             |
-| `AWS_SECRET_ACCESS_KEY` | SigV4 secret key (required if any bucket is `private`) | _(none)_             |
-| `MAX_X_PIXELS`          | Maximum allowed `size` width, in pixels                | `10000`              |
-| `MAX_Y_PIXELS`          | Maximum allowed `size` height, in pixels               | `10000`              |
-| `DEFAULT_SIZE`          | Size for keys with no `size` segment, as `{width}x{height}` | `100x100`       |
-| `DEFAULT_COLOUR`        | Background fill for keys with no `colour` segment: up to 8 comma-separated hex values, CSS colour names, or `random` / `random:{seed}` | `cccccc` |
-| `DEFAULT_GRADIENT`      | Gradient geometry for keys with no `gradient` segment: `linear[:deg]`, `radial`, `mesh` or `none` | _(none)_ |
-| `DEFAULT_GUIDES`        | Alignment overlay for keys with no `guides` segment: a comma-separated list of `cross`, `frame`, `corners`, `thirds`, or `all` / `none` | _(none)_ |
-| `DEFAULT_DELAY_MS`      | Delay for keys with no `delay` segment: fixed ms (`200`) or a range (`100,500`) | `0` (no delay) |
+| Variable                | Purpose                                                                                                                                 | Default              |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+| `PORT`                  | Listening port                                                                                                                          | `9000`               |
+| `BUCKETS`               | Comma-separated `name:mode` pairs (`public`/`private`)                                                                                  | `placeholder:public` |
+| `AWS_ACCESS_KEY_ID`     | SigV4 access key (required if any bucket is `private`)                                                                                  | _(none)_             |
+| `AWS_SECRET_ACCESS_KEY` | SigV4 secret key (required if any bucket is `private`)                                                                                  | _(none)_             |
+| `MAX_X_PIXELS`          | Maximum allowed `size` width, in pixels                                                                                                 | `10000`              |
+| `MAX_Y_PIXELS`          | Maximum allowed `size` height, in pixels                                                                                                | `10000`              |
+| `DEFAULT_SIZE`          | Size for keys with no `size` segment, as `{width}x{height}`                                                                             | `100x100`            |
+| `DEFAULT_COLOUR`        | Background fill for keys with no `colour` segment: up to 8 comma-separated hex values, CSS colour names, or `random` / `random:{seed}`  | `cccccc`             |
+| `DEFAULT_GRADIENT`      | Gradient geometry for keys with no `gradient` segment: `linear[:deg]`, `radial`, `mesh` or `none`                                       | _(none)_             |
+| `DEFAULT_GUIDES`        | Alignment overlay for keys with no `guides` segment: a comma-separated list of `cross`, `frame`, `corners`, `thirds`, or `all` / `none` | _(none)_             |
+| `DEFAULT_DELAY_MS`      | Delay for keys with no `delay` segment: fixed ms (`200`) or a range (`100,500`)                                                         | `0` (no delay)       |
 
 ## Key limitations vs. real AWS S3
 
@@ -265,7 +266,92 @@ All configuration is via environment variables:
   per-bucket CORS configuration.
 - **No multipart upload, versioning, or object metadata** beyond the
   `Content-Type`/`Content-Length` implied by the key.
-- **Large `mesh` images are slow to synthesize.** Mesh cost grows with
-  width x height x colours; at the default `MAX_X_PIXELS`/`MAX_Y_PIXELS` of
-  10000 it takes seconds. Lower the caps if that matters — a raster image that
-  large is already expensive to encode regardless of the gradient.
+- **Large `mesh` images are slow to synthesize.** Mesh cost grows with width x
+  height x colours; at the default `MAX_X_PIXELS`/`MAX_Y_PIXELS` of 10000 it
+  takes seconds. Lower the caps if that matters — a raster image that large is
+  already expensive to encode regardless of the gradient.
+
+## Gallery
+
+Every image below is the output of the command above it, against the container
+from [Quick start](#quick-start). `hack/gen-examples.sh` (or `make examples`)
+regenerates `examples/` by extracting these commands from this section and
+running them as they are written, so what you see is what the server produces.
+
+A single colour, painted flat:
+
+```sh
+curl http://localhost:9000/images/format=png/size=240x140/colour=lightblue -o examples/flat-colour.png
+```
+
+![Flat lightblue rectangle](examples/flat-colour.png)
+
+Two colours become a gradient; `linear:45` tilts the ramp 45° clockwise from
+pointing up:
+
+```sh
+curl http://localhost:9000/images/format=png/size=240x140/colour=ff8a00,e52e71/gradient=linear:45 -o examples/linear-gradient.png
+```
+
+![Orange-to-pink diagonal gradient](examples/linear-gradient.png)
+
+`radial` centres the first colour and pushes the last one to the corners:
+
+```sh
+curl http://localhost:9000/images/format=png/size=240x140/colour=fefefe,2b5876/gradient=radial -o examples/radial-gradient.png
+```
+
+![White centre fading to dark blue corners](examples/radial-gradient.png)
+
+`mesh` fills with the first colour and drops the rest in as soft blobs, so the
+colour varies across both axes:
+
+```sh
+curl http://localhost:9000/images/format=png/size=240x140/colour=1e3a8a,06b6d4,f472b6/gradient=mesh -o examples/mesh-gradient.png
+```
+
+![Blue, cyan and pink mesh gradient](examples/mesh-gradient.png)
+
+`text` is overlaid in a colour that contrasts with the background — `+` is a
+space:
+
+```sh
+curl http://localhost:9000/images/format=png/size=240x140/text=hello+world -o examples/text.png
+```
+
+![Grey rectangle labelled "hello world"](examples/text.png)
+
+`guides` marks the centre and the edges, so you can see whether a layout crops
+or off-centres the image:
+
+```sh
+curl http://localhost:9000/images/format=png/size=240x140/guides=cross,frame -o examples/guides.png
+```
+
+![Grey rectangle with a centre cross and a hairline frame](examples/guides.png)
+
+`random:{seed}` picks a stable vivid colour from a name you choose, rather than
+from the rest of the key — handy for stand-in avatars:
+
+```sh
+curl http://localhost:9000/images/format=png/size=140x140/colour=random:avatar42/text=MV -o examples/avatar.png
+```
+
+![Square avatar in a seeded colour with the initials "MV"](examples/avatar.png)
+
+Bare `random` derives its colours from the key itself, so every distinct key
+gets its own gradient and keeps it:
+
+```sh
+curl http://localhost:9000/images/format=png/size=240x140/colour=random,random/text=maria -o examples/random-gradient.png
+```
+
+![Gradient in two colours derived from the key, labelled "maria"](examples/random-gradient.png)
+
+Segments combine in any order:
+
+```sh
+curl http://localhost:9000/images/format=png/size=240x140/colour=steelblue,lightblue/gradient=linear:135/guides=corners/text=hero -o examples/hero.png
+```
+
+![Blue diagonal gradient with corner crop marks, labelled "hero"](examples/hero.png)
